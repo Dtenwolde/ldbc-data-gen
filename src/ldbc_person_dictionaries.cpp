@@ -704,6 +704,20 @@ int32_t LdbcTagDictionary::GetTagByCountry(LdbcJavaRandom &random_tag_other_coun
 	return tags_by_country[country_id][current_idx];
 }
 
+vector<int32_t> LdbcTagDictionary::GetRandomTags(LdbcJavaRandom &random, int32_t count) const {
+	vector<int32_t> result;
+	result.reserve(NumericCast<idx_t>(count));
+	while (NumericCast<int32_t>(result.size()) < count) {
+		auto country_id = random.NextInt(NumericCast<int32_t>(tags_by_country.size()));
+		auto &tags = tags_by_country[country_id];
+		if (tags.empty()) {
+			continue;
+		}
+		result.push_back(tags[random.NextInt(NumericCast<int32_t>(tags.size()))]);
+	}
+	return result;
+}
+
 const string &LdbcTagDictionary::GetName(int32_t tag_id) const {
 	if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_names.size() || tag_names[tag_id].empty()) {
 		throw InternalException("LDBC tag id out of range");
@@ -765,6 +779,15 @@ vector<int32_t> LdbcTagMatrix::GetSetOfTags(LdbcJavaRandom &random_topic, LdbcJa
 		result_tags.insert(related->second[mid_point]);
 	}
 	return vector<int32_t>(result_tags.begin(), result_tags.end());
+}
+
+int32_t LdbcTagMatrix::GetRandomRelated(LdbcJavaRandom &random, int32_t tag_id) const {
+	auto related = related_tags.find(tag_id);
+	if (related == related_tags.end()) {
+		tag_id = non_zero_tags[random.NextInt(NumericCast<int32_t>(non_zero_tags.size()))];
+		related = related_tags.find(tag_id);
+	}
+	return related->second[random.NextInt(NumericCast<int32_t>(related->second.size()))];
 }
 
 LdbcCompanyDictionary::LdbcCompanyDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,

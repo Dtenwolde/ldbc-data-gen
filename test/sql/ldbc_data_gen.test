@@ -209,9 +209,9 @@ WHERE relation_name IN ('Organisation', 'Person', 'Person_hasInterest_Tag', 'Per
                         'Forum_hasTag_Tag', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
-Forum	428
-Forum_hasMember_Person	1632
-Forum_hasTag_Tag	1634
+Forum	381
+Forum_hasMember_Person	1253
+Forum_hasTag_Tag	1587
 Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256
@@ -267,9 +267,9 @@ UNION ALL SELECT 'Forum_hasMember_Person', COUNT(*) FROM ldbc_test.Forum_hasMemb
 UNION ALL SELECT 'Forum_hasTag_Tag', COUNT(*) FROM ldbc_test.Forum_hasTag_Tag
 ORDER BY relation_name;
 ----
-Forum	428
-Forum_hasMember_Person	1632
-Forum_hasTag_Tag	1634
+Forum	381
+Forum_hasMember_Person	1253
+Forum_hasTag_Tag	1587
 Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256

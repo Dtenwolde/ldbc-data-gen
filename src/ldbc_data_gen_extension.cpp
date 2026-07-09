@@ -1196,7 +1196,45 @@ static vector<LdbcGenConfigEntry> BuildConfigEntries(const LdbcDatagenConfig &co
 	               "params_default.ini");
 	AddConfigEntry(entries, "max_num_tag_per_flashmob_post",
 	               std::to_string(config.max_num_tag_per_flashmob_post), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "flashmob_tags_per_month", std::to_string(config.flashmob_tags_per_month), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "min_text_size", std::to_string(config.min_text_size), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_text_size", std::to_string(config.max_text_size), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "min_comment_size", std::to_string(config.min_comment_size), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_comment_size", std::to_string(config.max_comment_size), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "min_large_post_size", std::to_string(config.min_large_post_size), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_large_post_size", std::to_string(config.max_large_post_size), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "min_large_comment_size", std::to_string(config.min_large_comment_size), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_large_comment_size", std::to_string(config.max_large_comment_size), "INTEGER",
+	               "params_default.ini");
 	AddConfigEntry(entries, "group_moderator_prob", DoubleToConfigString(config.group_moderator_prob), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_another_browser", DoubleToConfigString(config.prob_another_browser), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_diff_ip_travel_season", DoubleToConfigString(config.prob_diff_ip_travel_season),
+	               "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_diff_ip_not_travel_season",
+	               DoubleToConfigString(config.prob_diff_ip_not_travel_season), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "ratio_reduce_text", DoubleToConfigString(config.ratio_reduce_text), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "ratio_large_post", DoubleToConfigString(config.ratio_large_post), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "ratio_large_comment", DoubleToConfigString(config.ratio_large_comment), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_interest_flashmob_tag", DoubleToConfigString(config.prob_interest_flashmob_tag),
+	               "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_random_per_level", DoubleToConfigString(config.prob_random_per_level), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "flashmob_tag_min_level", DoubleToConfigString(config.flashmob_tag_min_level), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "flashmob_tag_max_level", DoubleToConfigString(config.flashmob_tag_max_level), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "flashmob_tag_dist_exp", DoubleToConfigString(config.flashmob_tag_dist_exp), "DOUBLE",
 	               "params_default.ini");
 	AddConfigEntry(entries, "prob_forum_deleted", DoubleToConfigString(config.prob_forum_deleted), "DOUBLE",
 	               "params_default.ini");

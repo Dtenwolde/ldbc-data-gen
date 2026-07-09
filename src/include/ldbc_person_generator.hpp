@@ -183,6 +183,7 @@ struct LdbcForum {
 	int64_t id;
 	string title;
 	int64_t moderator_person_id;
+	int32_t place_id;
 	vector<int32_t> tags;
 	vector<LdbcForumMembership> memberships;
 };

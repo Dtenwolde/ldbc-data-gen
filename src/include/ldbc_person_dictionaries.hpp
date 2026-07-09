@@ -124,6 +124,7 @@ public:
 
 	int32_t GetTagByCountry(LdbcJavaRandom &random_tag_other_country, LdbcJavaRandom &random_tag_country_prob,
 	                        int32_t country_id) const;
+	vector<int32_t> GetRandomTags(LdbcJavaRandom &random, int32_t count) const;
 	const string &GetName(int32_t tag_id) const;
 
 private:
@@ -139,6 +140,7 @@ public:
 
 	vector<int32_t> GetSetOfTags(LdbcJavaRandom &random_topic, LdbcJavaRandom &random_tag, int32_t popular_tag_id,
 	                             int32_t tag_count) const;
+	int32_t GetRandomRelated(LdbcJavaRandom &random, int32_t tag_id) const;
 
 private:
 	unordered_map<int32_t, vector<int32_t>> related_tags;
