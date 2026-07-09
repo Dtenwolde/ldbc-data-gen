@@ -183,20 +183,32 @@ ORDER BY sequential_id;
 3	56	866	1	Internet Explorer	31.185.10.92	ru;en	Dmitry	Garlitsky
 4	48	554	1	Internet Explorer	31.170.121.115	en;cy	John	Williams
 
+query ITT
+SELECT sequential_id, first_name, email
+FROM ldbcgen_person_core(sf := 0.003, rows := 5)
+ORDER BY sequential_id;
+----
+0	John	John19791209299968@gmail.com;John19791209299968@gmx.com;John19791209299968@hotmail.com;John19791209299968@yahoo.com
+1	Kostas	Kostas24189255811073@gmail.com
+2	Aryo	Aryo19791209299970@zoho.com;Aryo19791209299970@gmx.com;Aryo19791209299970@yahoo.com;Aryo19791209299970@gmail.com
+3	Dmitry	Dmitry3@gmx.com
+4	John	John32985348833284@yahoo.com;John32985348833284@gmx.com;John32985348833284@gmail.com;John32985348833284@hotmail.com;John32985348833284@zoho.com
+
 statement error
 SELECT *
 FROM ldbcgen_person_core(rows := -1);
 ----
 Binder Error: ldbcgen_person_core parameter rows must be non-negative
 
-# Confirm table generation returns static dictionary row counts.
+# Confirm table generation returns static dictionary and first dynamic row counts.
 query TI
 SELECT relation_name, row_count
 FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
-WHERE relation_name IN ('Organisation', 'Place', 'Tag', 'TagClass')
+WHERE relation_name IN ('Organisation', 'Person', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
 Organisation	7955
+Person	50
 Place	1460
 Tag	16080
 TagClass	71
@@ -236,12 +248,25 @@ SELECT 'Organisation' AS relation_name, COUNT(*) AS row_count FROM ldbc_test.Org
 UNION ALL SELECT 'Place', COUNT(*) FROM ldbc_test.Place
 UNION ALL SELECT 'Tag', COUNT(*) FROM ldbc_test.Tag
 UNION ALL SELECT 'TagClass', COUNT(*) FROM ldbc_test.TagClass
+UNION ALL SELECT 'Person', COUNT(*) FROM ldbc_test.Person
 ORDER BY relation_name;
 ----
 Organisation	7955
+Person	50
 Place	1460
 Tag	16080
 TagClass	71
+
+query II
+SELECT COUNT(*),
+       COUNT(*) FILTER (WHERE email LIKE '%@%'
+                         AND gender IN ('female', 'male')
+                         AND language <> ''
+                         AND firstName <> ''
+                         AND lastName <> '')
+FROM ldbc_test.Person;
+----
+50	50
 
 query I
 SELECT COUNT(*)

@@ -361,6 +361,15 @@ static std::ifstream OpenDictionaryFile(const LdbcGenBindData &bind_data, const 
 	return file;
 }
 
+static string ResourceDirFromDictionaryDir(const string &dictionary_dir) {
+	const string suffix = "/dictionaries";
+	if (dictionary_dir.size() >= suffix.size() &&
+	    dictionary_dir.substr(dictionary_dir.size() - suffix.size()) == suffix) {
+		return dictionary_dir.substr(0, dictionary_dir.size() - suffix.size());
+	}
+	return dictionary_dir;
+}
+
 static string StripCarriageReturn(string value) {
 	if (!value.empty() && value.back() == '\r') {
 		value.pop_back();
@@ -696,6 +705,41 @@ static idx_t AppendOrganisations(ClientContext &context, const LdbcGenBindData &
 	return row_count;
 }
 
+static idx_t AppendPersons(ClientContext &context, const LdbcGenBindData &bind_data) {
+	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
+	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
+	LdbcDateGenerator dates(config);
+	LdbcPersonGenerator generator(config);
+	auto appender = MakeStaticAppender(context, bind_data, "Person");
+	auto bulkload_threshold =
+	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
+	                                                 (1.0 - config.bulkload_portion));
+
+	idx_t row_count = 0;
+	for (int64_t sequential_id = 0; sequential_id < config.num_persons; sequential_id++) {
+		auto person = generator.GenerateCore(sequential_id);
+		if (person.creation_date >= bulkload_threshold) {
+			continue;
+		}
+		appender->BeginRow();
+		appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+		appender->Append<int64_t>(person.account_id);
+		appender->Append(Value(person.first_name));
+		appender->Append(Value(person.last_name));
+		appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
+		appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
+		appender->Append(Value(person.ip_address));
+		appender->Append(Value(person.browser_name));
+		appender->Append<int32_t>(person.city_id);
+		appender->Append(Value(person.languages));
+		appender->Append(Value(person.emails));
+		appender->EndRow();
+		row_count++;
+	}
+	appender->Close();
+	return row_count;
+}
+
 static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data) {
 	auto data = LoadStaticDictionaryData(bind_data);
 	unordered_map<string, idx_t> row_counts;
@@ -703,6 +747,7 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
 	row_counts["Tag"] = AppendTags(context, bind_data, data);
 	row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
+	row_counts["Person"] = AppendPersons(context, bind_data);
 	return row_counts;
 }
 
@@ -767,11 +812,12 @@ void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, st
 }
 
 unordered_map<string, idx_t> LDBCGenWrapper::LoadLDBCData(ClientContext &context, string catalog, string schema,
-                                                          string dictionary_dir) {
+                                                          string dictionary_dir, double scale_factor) {
 	LdbcGenBindData bind_data;
 	bind_data.catalog = std::move(catalog);
 	bind_data.schema = std::move(schema);
 	bind_data.dictionary_dir = std::move(dictionary_dir);
+	bind_data.scale_factor = scale_factor;
 	return PopulateStaticTables(context, bind_data);
 }
 
@@ -854,7 +900,8 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	if (bind_data.target == "tables" && !state.materialized) {
 		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite);
 		state.row_counts =
-		    ldbc::LDBCGenWrapper::LoadLDBCData(context, bind_data.catalog, bind_data.schema, bind_data.dictionary_dir);
+		    ldbc::LDBCGenWrapper::LoadLDBCData(context, bind_data.catalog, bind_data.schema, bind_data.dictionary_dir,
+		                                       bind_data.scale_factor);
 		state.materialized = true;
 	}
 
@@ -1126,6 +1173,8 @@ static unique_ptr<FunctionData> LdbcGenPersonCoreBind(ClientContext &context, Ta
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("last_name");
 	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("email");
+	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("message_deleter");
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("random_id");
@@ -1163,8 +1212,9 @@ static void LdbcGenPersonCoreFunction(ClientContext &context, TableFunctionInput
 		output.data[14].SetValue(count, person.languages);
 		output.data[15].SetValue(count, person.first_name);
 		output.data[16].SetValue(count, person.last_name);
-		output.data[17].SetValue(count, Value::BOOLEAN(person.message_deleter));
-		output.data[18].SetValue(count, Value::BIGINT(person.random_id));
+		output.data[17].SetValue(count, person.emails);
+		output.data[18].SetValue(count, Value::BOOLEAN(person.message_deleter));
+		output.data[19].SetValue(count, Value::BIGINT(person.random_id));
 		count++;
 		state.offset++;
 	}

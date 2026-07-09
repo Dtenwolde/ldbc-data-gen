@@ -489,11 +489,60 @@ string LdbcNamesDictionary::GetRandomSurname(LdbcJavaRandom &random, int32_t cou
 	return entry->second[surname_id];
 }
 
+LdbcEmailDictionary::LdbcEmailDictionary(const string &dictionary_dir) {
+	auto file = OpenDictionaryPath(dictionary_dir, "email.txt");
+	string line;
+	double cumulative = 0.0;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.empty()) {
+			continue;
+		}
+		emails.push_back(columns[0]);
+		if (columns.size() == 2) {
+			cumulative += std::stod(columns[1]);
+			cumulative_distribution.push_back(cumulative);
+		}
+	}
+	if (emails.empty() || cumulative_distribution.empty()) {
+		throw InvalidInputException("LDBC email dictionary must contain weighted email domains");
+	}
+}
+
+string LdbcEmailDictionary::GetRandomEmail(LdbcJavaRandom &random_top, LdbcJavaRandom &random_email) const {
+	auto min_idx = idx_t(0);
+	auto max_idx = cumulative_distribution.size() - 1;
+	auto probability = random_top.NextDouble();
+	if (probability > cumulative_distribution[max_idx]) {
+		auto tail_size = NumericCast<int32_t>(emails.size() - cumulative_distribution.size());
+		auto email_idx = random_email.NextInt(tail_size) + NumericCast<int32_t>(cumulative_distribution.size());
+		return emails[email_idx];
+	}
+	if (probability < cumulative_distribution[min_idx]) {
+		return emails[min_idx];
+	}
+
+	while (max_idx - min_idx > 1) {
+		auto middle = min_idx + (max_idx - min_idx) / 2;
+		if (probability > cumulative_distribution[middle]) {
+			min_idx = middle;
+		} else {
+			max_idx = middle;
+		}
+	}
+	return emails[max_idx];
+}
+
 LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang)
     : browsers(LdbcResourcePath(resource_dir, "dictionaries")), places(LdbcResourcePath(resource_dir, "dictionaries")),
       ips(resource_dir, places),
       languages(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_english, prob_second_lang),
-      names(LdbcResourcePath(resource_dir, "dictionaries"), places) {
+      names(LdbcResourcePath(resource_dir, "dictionaries"), places),
+      emails(LdbcResourcePath(resource_dir, "dictionaries")) {
 }
 
 } // namespace duckdb

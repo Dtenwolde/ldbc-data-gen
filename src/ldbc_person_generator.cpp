@@ -1,7 +1,11 @@
 #include "ldbc_person_generator.hpp"
 
+#include "ldbc_unicode.hpp"
+
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/types/date.hpp"
+
+#include <algorithm>
 
 namespace duckdb {
 
@@ -117,6 +121,24 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 	auto first_name =
 	    dictionaries.names.GetRandomGivenName(random_farm.Get(LdbcRandomAspect::NAME), country_id, gender == 1, birth_year);
 	auto last_name = dictionaries.names.GetRandomSurname(random_farm.Get(LdbcRandomAspect::SURNAME), country_id);
+	auto email_base = LdbcEmailBaseFromFirstName(first_name);
+	auto email_count = random_farm.Get(LdbcRandomAspect::EXTRA_INFO).NextInt(config.max_emails) + 1;
+	vector<string> emails;
+	while (NumericCast<int32_t>(emails.size()) < email_count) {
+		auto email = email_base + std::to_string(account_id) + "@" +
+		             dictionaries.emails.GetRandomEmail(random_farm.Get(LdbcRandomAspect::TOP_EMAIL),
+		                                                random_farm.Get(LdbcRandomAspect::EMAIL));
+		if (std::find(emails.begin(), emails.end(), email) == emails.end()) {
+			emails.push_back(std::move(email));
+		}
+	}
+	string email_list;
+	for (idx_t email_idx = 0; email_idx < emails.size(); email_idx++) {
+		if (email_idx > 0) {
+			email_list += ";";
+		}
+		email_list += emails[email_idx];
+	}
 
 	LdbcPersonCore result;
 	result.sequential_id = sequential_id;
@@ -132,6 +154,7 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 	result.browser_name = dictionaries.browsers.GetName(browser_id);
 	result.ip_address = ip_address;
 	result.languages = languages;
+	result.emails = email_list;
 	result.first_name = first_name;
 	result.last_name = last_name;
 	result.message_deleter = message_deleter;

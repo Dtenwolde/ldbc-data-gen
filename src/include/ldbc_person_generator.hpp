@@ -83,6 +83,7 @@ struct LdbcPersonCore {
 	string browser_name;
 	string ip_address;
 	string languages;
+	string emails;
 	string first_name;
 	string last_name;
 	bool message_deleter;

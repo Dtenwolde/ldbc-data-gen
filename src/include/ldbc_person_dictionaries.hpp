@@ -89,6 +89,17 @@ private:
 	std::array<unordered_map<int32_t, vector<string>>, BIRTH_YEAR_PERIODS> given_names_female;
 };
 
+class LdbcEmailDictionary {
+public:
+	explicit LdbcEmailDictionary(const string &dictionary_dir);
+
+	string GetRandomEmail(LdbcJavaRandom &random_top, LdbcJavaRandom &random_email) const;
+
+private:
+	vector<string> emails;
+	vector<double> cumulative_distribution;
+};
+
 class LdbcPersonDictionaries {
 public:
 	LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang);
@@ -98,6 +109,7 @@ public:
 	LdbcIPAddressDictionary ips;
 	LdbcLanguageDictionary languages;
 	LdbcNamesDictionary names;
+	LdbcEmailDictionary emails;
 };
 
 string LdbcResourcePath(const string &base, const string &path);
