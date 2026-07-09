@@ -1,0 +1,23 @@
+# name: test/sql/ldbc_data_gen.test
+# description: test ldbc_data_gen extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT ldbc_data_gen('Sam');
+----
+Catalog Error: Scalar Function with name ldbc_data_gen does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require ldbc_data_gen
+
+# Confirm the extension works
+query I
+SELECT ldbc_data_gen('Sam');
+----
+...........🦆 Sam
+
+query I
+SELECT ldbc_data_gen_openssl_version('Michael') ILIKE 'LdbcDataGen Michael, my linked OpenSSL version is OpenSSL%';
+----
+true
