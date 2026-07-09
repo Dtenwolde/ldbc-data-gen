@@ -285,25 +285,25 @@ static idx_t LdbcSchemaSize() {
 	return sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]);
 }
 
-static vector<string> SplitPrimaryKey(const string &primary_key) {
-	vector<string> result;
+static vector<Identifier> SplitPrimaryKey(const string &primary_key) {
+	vector<Identifier> result;
 	string current;
 	for (auto c : primary_key) {
 		if (c == ',') {
-			result.push_back(current);
+			result.push_back(Identifier(current));
 			current.clear();
 		} else {
 			current += c;
 		}
 	}
 	if (!current.empty()) {
-		result.push_back(current);
+		result.push_back(Identifier(current));
 	}
 	return result;
 }
 
 static void CreateSchemaIfNeeded(ClientContext &context, const string &catalog_name, const string &schema) {
-	auto &catalog = Catalog::GetCatalog(context, catalog_name);
+	auto &catalog = Catalog::GetCatalog(context, Identifier(catalog_name));
 	CreateSchemaInfo info;
 	info.catalog = catalog_name;
 	info.schema = schema;
@@ -319,7 +319,7 @@ static void DropTableIfNeeded(ClientContext &context, const string &catalog_name
 	drop_info.schema = schema;
 	drop_info.name = table_name;
 	drop_info.if_not_found = OnEntryNotFound::RETURN_NULL;
-	Catalog::GetCatalog(context, catalog_name).DropEntry(context, drop_info);
+	Catalog::GetCatalog(context, Identifier(catalog_name)).DropEntry(context, drop_info);
 }
 
 static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begin, const LdbcSchemaColumn *end,
@@ -329,7 +329,8 @@ static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begi
 		DropTableIfNeeded(context, catalog_name, schema, table_name);
 	}
 
-	auto table_info = make_uniq<CreateTableInfo>(catalog_name, schema, table_name);
+	auto table_info = make_uniq<CreateTableInfo>(
+	    QualifiedName(Identifier(catalog_name), Identifier(schema), Identifier(table_name)));
 	idx_t column_index = 0;
 	for (auto column = begin; column != end; column++) {
 		table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
@@ -339,7 +340,7 @@ static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begi
 		column_index++;
 	}
 	table_info->constraints.push_back(make_uniq<UniqueConstraint>(SplitPrimaryKey(begin->primary_key), true));
-	Catalog::GetCatalog(context, catalog_name).CreateTable(context, std::move(table_info));
+	Catalog::GetCatalog(context, Identifier(catalog_name)).CreateTable(context, std::move(table_info));
 }
 
 static string DictionaryPath(const LdbcGenBindData &bind_data, const string &file_name) {
@@ -1053,8 +1054,8 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	}
 
 	auto result = make_uniq<LdbcGenBindData>();
-	result->catalog = DatabaseManager::GetDefaultDatabase(context);
-	result->schema = ClientData::Get(context).catalog_search_path->GetDefault().schema;
+	result->catalog = DatabaseManager::GetDefaultDatabase(context).GetIdentifierName();
+	result->schema = ClientData::Get(context).catalog_search_path->GetDefault().GetSchema().GetIdentifierName();
 	result->scale_factor = GetDoubleParameter(input, "sf", 1.0);
 	result->catalog = GetStringParameter(input, "catalog", result->catalog);
 	result->output_dir = GetStringParameter(input, "output_dir", "");
@@ -1080,7 +1081,7 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 		throw BinderException("ldbcgen parameter format must be either 'parquet' or 'csv'");
 	}
 	if (input.binder && result->target == "tables") {
-		auto &catalog = Catalog::GetCatalog(context, result->catalog);
+		auto &catalog = Catalog::GetCatalog(context, Identifier(result->catalog));
 		auto &properties = input.binder->GetStatementProperties();
 		DatabaseModificationType modification;
 		modification |= DatabaseModificationType::CREATE_CATALOG_ENTRY;
