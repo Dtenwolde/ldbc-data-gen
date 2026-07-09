@@ -98,6 +98,19 @@ This check is Spark-free and CI-safe. It validates the pinned upstream commit me
 
 Generated data should stay out of git. Use ignored directories such as `out/`, `generated/`, or `reference_data/`.
 
+Generate static DuckDB parity checksums:
+
+```sh
+python3 tools/static_parity.py
+```
+
+Compare against Spark reference output:
+
+```sh
+python3 tools/static_parity.py \
+  --reference reference_data/sf0.003/graphs/parquet/bi/composite-merged-fk/initial_snapshot
+```
+
 ## Building And Testing
 
 Initialize submodules:
