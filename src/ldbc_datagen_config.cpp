@@ -181,6 +181,9 @@ LdbcDatagenConfig LdbcDatagenConfig::Load(double scale_factor, const string &res
 	config.min_num_tags_per_person = IntProperty(config.properties, "generator.minNumTagsPerPerson");
 	config.max_num_tags_per_person = IntProperty(config.properties, "generator.maxNumTagsPerPerson");
 	config.max_emails = IntProperty(config.properties, "generator.maxEmails");
+	config.base_prob_correlated = DoubleProperty(config.properties, "generator.baseProbCorrelated");
+	config.limit_prob_correlated = DoubleProperty(config.properties, "generator.limitProCorrelated");
+	config.prob_knows_deleted = DoubleProperty(config.properties, "generator.probKnowsDeleted");
 
 	// Preserve Spark DatagenParams.readConf quirks for exact parity.
 	config.max_companies = IntProperty(config.properties, "generator.maxEmails");

@@ -604,6 +604,28 @@ string LdbcEmailDictionary::GetRandomEmail(LdbcJavaRandom &random_top, LdbcJavaR
 	return emails[max_idx];
 }
 
+LdbcPersonDeleteDistribution::LdbcPersonDeleteDistribution(const string &dictionary_dir) {
+	auto file = OpenDictionaryPath(dictionary_dir, "personDelete.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (!line.empty()) {
+			distribution.push_back(std::stod(line));
+		}
+	}
+	if (distribution.empty()) {
+		throw InvalidInputException("LDBC personDelete.txt must not be empty");
+	}
+}
+
+bool LdbcPersonDeleteDistribution::IsDeleted(LdbcJavaRandom &random, int64_t max_knows) const {
+	auto index = NumericCast<idx_t>(std::max<int64_t>(0, max_knows));
+	if (index >= distribution.size()) {
+		index = distribution.size() - 1;
+	}
+	return random.NextDouble() < distribution[index];
+}
+
 LdbcTagDictionary::LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob)
     : tag_country_corr_prob(tag_country_corr_prob), tags_by_country(country_count),
       cumulative_distribution_by_country(country_count) {
@@ -815,6 +837,7 @@ LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, doubl
       languages(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_english, prob_second_lang),
       names(LdbcResourcePath(resource_dir, "dictionaries"), places),
       emails(LdbcResourcePath(resource_dir, "dictionaries")),
+      person_deletes(LdbcResourcePath(resource_dir, "dictionaries")),
       tags(LdbcResourcePath(resource_dir, "dictionaries"), places.GetCountries().size(), tag_country_corr_prob),
       tag_matrix(LdbcResourcePath(resource_dir, "dictionaries")),
       companies(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_company),

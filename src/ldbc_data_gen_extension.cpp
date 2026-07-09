@@ -710,24 +710,25 @@ struct PersonOwnedRowCounts {
 	idx_t interests = 0;
 	idx_t study_at = 0;
 	idx_t work_at = 0;
+	idx_t knows = 0;
 };
 
 static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
 	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
 	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
 	LdbcDateGenerator dates(config);
-	LdbcPersonGenerator generator(config);
+	auto persons = LdbcGeneratePersons(config);
 	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
 	auto interest_appender = MakeStaticAppender(context, bind_data, "Person_hasInterest_Tag");
 	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
 	auto work_appender = MakeStaticAppender(context, bind_data, "Person_workAt_Company");
+	auto knows_appender = MakeStaticAppender(context, bind_data, "Person_knows_Person");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
 	                                                 (1.0 - config.bulkload_portion));
 
 	PersonOwnedRowCounts row_counts;
-	for (int64_t sequential_id = 0; sequential_id < config.num_persons; sequential_id++) {
-		auto person = generator.GenerateCore(sequential_id);
+	for (auto &person : persons) {
 		if (person.creation_date >= bulkload_threshold) {
 			continue;
 		}
@@ -776,10 +777,24 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			row_counts.work_at++;
 		}
 	}
+
+	auto knows_edges = LdbcGenerateKnows(config, persons);
+	for (auto &edge : knows_edges) {
+		if (edge.creation_date >= bulkload_threshold) {
+			continue;
+		}
+		knows_appender->BeginRow();
+		knows_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(edge.creation_date)));
+		knows_appender->Append<int64_t>(edge.person1_id);
+		knows_appender->Append<int64_t>(edge.person2_id);
+		knows_appender->EndRow();
+		row_counts.knows++;
+	}
 	person_appender->Close();
 	interest_appender->Close();
 	study_appender->Close();
 	work_appender->Close();
+	knows_appender->Close();
 	return row_counts;
 }
 
@@ -793,6 +808,7 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	auto person_counts = AppendPersonOwnedTables(context, bind_data);
 	row_counts["Person"] = person_counts.persons;
 	row_counts["Person_hasInterest_Tag"] = person_counts.interests;
+	row_counts["Person_knows_Person"] = person_counts.knows;
 	row_counts["Person_studyAt_University"] = person_counts.study_at;
 	row_counts["Person_workAt_Company"] = person_counts.work_at;
 	return row_counts;
@@ -1198,6 +1214,14 @@ static unique_ptr<FunctionData> LdbcGenPersonCoreBind(ClientContext &context, Ta
 	return_types.emplace_back(LogicalType::TIMESTAMP_MS);
 	names.emplace_back("id");
 	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("deletion_date_ms");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("deletionDate");
+	return_types.emplace_back(LogicalType::TIMESTAMP_MS);
+	names.emplace_back("explicitly_deleted");
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("max_num_knows");
+	return_types.emplace_back(LogicalType::BIGINT);
 	names.emplace_back("birthday_ms");
 	return_types.emplace_back(LogicalType::BIGINT);
 	names.emplace_back("birthday");
@@ -1248,20 +1272,24 @@ static void LdbcGenPersonCoreFunction(ClientContext &context, TableFunctionInput
 		output.data[3].SetValue(count, Value::BIGINT(person.creation_date));
 		output.data[4].SetValue(count, Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
 		output.data[5].SetValue(count, Value::BIGINT(person.account_id));
-		output.data[6].SetValue(count, Value::BIGINT(person.birthday));
-		output.data[7].SetValue(count, Value::DATE(LdbcDateFromEpochMs(person.birthday)));
-		output.data[8].SetValue(count, Value::TINYINT(person.gender));
-		output.data[9].SetValue(count, Value::INTEGER(person.country_id));
-		output.data[10].SetValue(count, Value::INTEGER(person.city_id));
-		output.data[11].SetValue(count, Value::INTEGER(person.browser_id));
-		output.data[12].SetValue(count, person.browser_name);
-		output.data[13].SetValue(count, person.ip_address);
-		output.data[14].SetValue(count, person.languages);
-		output.data[15].SetValue(count, person.first_name);
-		output.data[16].SetValue(count, person.last_name);
-		output.data[17].SetValue(count, person.emails);
-		output.data[18].SetValue(count, Value::BOOLEAN(person.message_deleter));
-		output.data[19].SetValue(count, Value::BIGINT(person.random_id));
+		output.data[6].SetValue(count, Value::BIGINT(person.deletion_date));
+		output.data[7].SetValue(count, Value::TIMESTAMP(LdbcTimestampMs(person.deletion_date)));
+		output.data[8].SetValue(count, Value::BOOLEAN(person.explicitly_deleted));
+		output.data[9].SetValue(count, Value::BIGINT(person.max_num_knows));
+		output.data[10].SetValue(count, Value::BIGINT(person.birthday));
+		output.data[11].SetValue(count, Value::DATE(LdbcDateFromEpochMs(person.birthday)));
+		output.data[12].SetValue(count, Value::TINYINT(person.gender));
+		output.data[13].SetValue(count, Value::INTEGER(person.country_id));
+		output.data[14].SetValue(count, Value::INTEGER(person.city_id));
+		output.data[15].SetValue(count, Value::INTEGER(person.browser_id));
+		output.data[16].SetValue(count, person.browser_name);
+		output.data[17].SetValue(count, person.ip_address);
+		output.data[18].SetValue(count, person.languages);
+		output.data[19].SetValue(count, person.first_name);
+		output.data[20].SetValue(count, person.last_name);
+		output.data[21].SetValue(count, person.emails);
+		output.data[22].SetValue(count, Value::BOOLEAN(person.message_deleter));
+		output.data[23].SetValue(count, Value::BIGINT(person.random_id));
 		count++;
 		state.offset++;
 	}

@@ -111,6 +111,34 @@ python3 tools/static_parity.py \
   --reference reference_data/sf0.003/graphs/parquet/bi/composite-merged-fk/initial_snapshot
 ```
 
+Compare currently implemented dynamic relations against Spark reference output:
+
+```sh
+python3 tools/dynamic_parity.py
+```
+
+This currently covers `Person`, `Person_hasInterest_Tag`, `Person_studyAt_University`,
+`Person_workAt_Company`, and `Person_knows_Person`.
+
+Generate the pinned Spark reference output locally:
+
+```sh
+python3 tools/generate_spark_reference.py --dry-run
+python3 tools/generate_spark_reference.py
+```
+
+This wraps `third_party/ldbc_snb_datagen_spark/tools/run.py` and defaults to `sf=0.003`, BI mode, Parquet, one Spark partition, and `reference_data/sf0.003`. The Spark generator requires Java 8 or 11, `sbt`, and Spark 3.2.x. If Spark is not installed, the wrapper can use the upstream helper to download Spark 3.2.2 into `${HOME}`:
+
+```sh
+python3 tools/generate_spark_reference.py --download-spark
+```
+
+The expected BI reference root for parity scripts is:
+
+```text
+reference_data/sf0.003/graphs/parquet/bi/composite-merged-fk/initial_snapshot
+```
+
 ## Building And Testing
 
 Initialize submodules:

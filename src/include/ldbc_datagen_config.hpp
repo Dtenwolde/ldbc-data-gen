@@ -24,6 +24,9 @@ struct LdbcDatagenConfig {
 	int32_t max_num_tags_per_person;
 	int32_t max_emails;
 	int32_t max_companies;
+	double base_prob_correlated;
+	double limit_prob_correlated;
+	double prob_knows_deleted;
 	double prob_english;
 	double prob_second_lang;
 	double missing_ratio;

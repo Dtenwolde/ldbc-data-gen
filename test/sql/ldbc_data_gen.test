@@ -168,7 +168,7 @@ FROM ldbcgen_person_core(sf := 1, rows := 10005)
 WHERE sequential_id IN (9999, 10000, 10001)
 ORDER BY sequential_id;
 ----
-9999	0	9999	1265663601555	9999
+9999	0	9999	1300657258648	15393162798863
 10000	1	0	1281244244465	6597069776656
 10001	1	1	1329556423042	26388279076625
 
@@ -177,11 +177,11 @@ SELECT sequential_id, country_id, city_id, browser_id, browser, ip_address, lang
 FROM ldbcgen_person_core(sf := 0.003, rows := 5)
 ORDER BY sequential_id;
 ----
-0	0	285	1	Internet Explorer	27.4.90.237	ml;gu;en	John	Kapoor
-1	78	1147	1	Internet Explorer	91.223.132.248	fr;en	Kostas	Antoniou
-2	51	642	0	Chrome	58.145.168.54	en;jv	Aryo	Ali
-3	56	866	1	Internet Explorer	31.185.10.92	ru;en	Dmitry	Garlitsky
-4	48	554	1	Internet Explorer	31.170.121.115	en;cy	John	Williams
+0	0	285	1	Internet Explorer	27.4.90.237	te;ur;en	John	Khan
+1	78	1147	1	Internet Explorer	91.223.132.248	en;fr	Evangelos	Alkaios
+2	51	642	0	Chrome	58.145.168.54	jv;en	Abdul Haris	Tobing
+3	56	866	1	Internet Explorer	31.185.10.92	ru;en	Aleksandr	Efimkin
+4	48	554	1	Internet Explorer	31.170.121.115	en;cy	Bryn	Davies
 
 query ITT
 SELECT sequential_id, first_name, email
@@ -189,10 +189,10 @@ FROM ldbcgen_person_core(sf := 0.003, rows := 5)
 ORDER BY sequential_id;
 ----
 0	John	John19791209299968@gmail.com;John19791209299968@gmx.com;John19791209299968@hotmail.com;John19791209299968@yahoo.com
-1	Kostas	Kostas10995116277761@gmail.com;Kostas10995116277761@zoho.com;Kostas10995116277761@gmx.com;Kostas10995116277761@yahoo.com
-2	Aryo	Aryo35184372088834@gmx.com;Aryo35184372088834@yahoo.com;Aryo35184372088834@gmail.com;Aryo35184372088834@hotmail.com
-3	Dmitry	Dmitry30786325577731@gmail.com;Dmitry30786325577731@gmx.com;Dmitry30786325577731@zoho.com
-4	John	John28587302322180@gmx.com;John28587302322180@gmail.com;John28587302322180@hotmail.com
+1	Evangelos	Evangelos10995116277761@gmail.com;Evangelos10995116277761@zoho.com;Evangelos10995116277761@gmx.com;Evangelos10995116277761@yahoo.com
+2	Abdul Haris	Abdul.Haris35184372088834@gmx.com;Abdul.Haris35184372088834@yahoo.com;Abdul.Haris35184372088834@gmail.com;Abdul.Haris35184372088834@hotmail.com
+3	Aleksandr	Aleksandr30786325577731@gmail.com;Aleksandr30786325577731@gmx.com;Aleksandr30786325577731@zoho.com
+4	Bryn	Bryn28587302322180@gmx.com;Bryn28587302322180@gmail.com;Bryn28587302322180@hotmail.com
 
 statement error
 SELECT *
@@ -205,14 +205,15 @@ query TI
 SELECT relation_name, row_count
 FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
 WHERE relation_name IN ('Organisation', 'Person', 'Person_hasInterest_Tag', 'Person_studyAt_University',
-                        'Person_workAt_Company', 'Place', 'Tag', 'TagClass')
+                        'Person_workAt_Company', 'Person_knows_Person', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
 Organisation	7955
-Person	49
-Person_hasInterest_Tag	1218
+Person	50
+Person_hasInterest_Tag	1256
+Person_knows_Person	83
 Person_studyAt_University	42
-Person_workAt_Company	100
+Person_workAt_Company	103
 Place	1460
 Tag	16080
 TagClass	71
@@ -254,15 +255,17 @@ UNION ALL SELECT 'Tag', COUNT(*) FROM ldbc_test.Tag
 UNION ALL SELECT 'TagClass', COUNT(*) FROM ldbc_test.TagClass
 UNION ALL SELECT 'Person', COUNT(*) FROM ldbc_test.Person
 UNION ALL SELECT 'Person_hasInterest_Tag', COUNT(*) FROM ldbc_test.Person_hasInterest_Tag
+UNION ALL SELECT 'Person_knows_Person', COUNT(*) FROM ldbc_test.Person_knows_Person
 UNION ALL SELECT 'Person_studyAt_University', COUNT(*) FROM ldbc_test.Person_studyAt_University
 UNION ALL SELECT 'Person_workAt_Company', COUNT(*) FROM ldbc_test.Person_workAt_Company
 ORDER BY relation_name;
 ----
 Organisation	7955
-Person	49
-Person_hasInterest_Tag	1218
+Person	50
+Person_hasInterest_Tag	1256
+Person_knows_Person	83
 Person_studyAt_University	42
-Person_workAt_Company	100
+Person_workAt_Company	103
 Place	1460
 Tag	16080
 TagClass	71
@@ -276,7 +279,7 @@ SELECT COUNT(*),
                          AND lastName <> '')
 FROM ldbc_test.Person;
 ----
-49	49
+50	50
 
 query I
 SELECT COUNT(*)
@@ -307,6 +310,17 @@ LEFT JOIN ldbc_test.Organisation organisation ON edge.CompanyId = organisation.i
 WHERE person.id IS NULL
    OR organisation.id IS NULL
    OR organisation.type <> 'Company';
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_knows_Person edge
+LEFT JOIN ldbc_test.Person person1 ON edge.Person1Id = person1.id
+LEFT JOIN ldbc_test.Person person2 ON edge.Person2Id = person2.id
+WHERE person1.id IS NULL
+   OR person2.id IS NULL
+   OR edge.Person1Id >= edge.Person2Id;
 ----
 0
 

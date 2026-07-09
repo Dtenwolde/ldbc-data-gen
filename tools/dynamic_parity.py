@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare DuckDB-generated static LDBC tables with optional Spark reference output."""
+"""Compare DuckDB-generated dynamic LDBC tables with Spark reference output."""
 
 from __future__ import annotations
 
@@ -12,7 +12,13 @@ import tempfile
 from pathlib import Path
 
 
-STATIC_RELATIONS = {"Organisation", "Place", "Tag", "TagClass"}
+DYNAMIC_RELATIONS = {
+    "Person",
+    "Person_hasInterest_Tag",
+    "Person_knows_Person",
+    "Person_studyAt_University",
+    "Person_workAt_Company",
+}
 NULL_MARKER = "<LDBC_NULL>"
 FIELD_SEP = "\\x1f"
 ROW_SEP = "\\x1e"
@@ -26,9 +32,9 @@ def sql_string(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def load_static_relations(fixture_path: Path) -> list[dict]:
+def load_dynamic_relations(fixture_path: Path) -> list[dict]:
     fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    relations = [relation for relation in fixture["relations"] if relation["name"] in STATIC_RELATIONS]
+    relations = [relation for relation in fixture["relations"] if relation["name"] in DYNAMIC_RELATIONS]
     relations.sort(key=lambda relation: relation["name"])
     return relations
 
@@ -75,12 +81,12 @@ def relation_summary(duckdb: Path, database: Path, relation: dict, source: str) 
     return int(rows[0][0]), rows[0][1]
 
 
-def reference_path(reference_root: Path, relation: dict, fmt: str) -> Path:
+def reference_path(reference_root: Path, relation: dict) -> Path:
     return reference_root / relation["entity_path"]
 
 
 def create_reference_view(duckdb: Path, database: Path, reference_root: Path, relation: dict, fmt: str) -> None:
-    path = reference_path(reference_root, relation, fmt)
+    path = reference_path(reference_root, relation)
     if not path.exists():
         fail(f"missing reference path for {relation['name']}: {path}")
     view_name = f"ref_{relation['name']}"
@@ -107,10 +113,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--reference",
         type=Path,
-        help="Spark initial_snapshot root, e.g. graphs/parquet/bi/composite-merged-fk/initial_snapshot",
+        default=root / "reference_data/sf0.003/graphs/parquet/bi/composite-merged-fk/initial_snapshot",
+        help="Spark initial_snapshot root.",
     )
     parser.add_argument("--format", choices=["parquet", "csv"], default="parquet")
-    parser.add_argument("--schema", default="ldbc_static_parity")
+    parser.add_argument("--schema", default="ldbc_dynamic_parity")
     parser.add_argument("--sf", type=float, default=0.003)
     args = parser.parse_args(argv)
 
@@ -119,8 +126,8 @@ def main(argv: list[str]) -> int:
     if not args.extension.exists():
         fail(f"extension not found: {args.extension}; run make first")
 
-    relations = load_static_relations(args.fixture)
-    with tempfile.TemporaryDirectory(prefix="ldbc-static-parity-") as tmpdir:
+    relations = load_dynamic_relations(args.fixture)
+    with tempfile.TemporaryDirectory(prefix="ldbc-dynamic-parity-") as tmpdir:
         database = Path(tmpdir) / "parity.duckdb"
         setup_sql = (
             f"LOAD {sql_string(args.extension)}; "
@@ -128,20 +135,16 @@ def main(argv: list[str]) -> int:
         )
         run_duckdb(args.duckdb, database, setup_sql)
 
-        rows: list[tuple[str, int, str, int | None, str | None, bool | None]] = []
+        rows: list[tuple[str, int, str, int, str, bool]] = []
         for relation in relations:
             generated_count, generated_checksum = relation_summary(
                 args.duckdb, database, relation, f"{args.schema}.{relation['name']}"
             )
-            reference_count = None
-            reference_checksum = None
-            matches = None
-            if args.reference:
-                create_reference_view(args.duckdb, database, args.reference, relation, args.format)
-                reference_count, reference_checksum = relation_summary(
-                    args.duckdb, database, relation, f"ref_{relation['name']}"
-                )
-                matches = generated_count == reference_count and generated_checksum == reference_checksum
+            create_reference_view(args.duckdb, database, args.reference, relation, args.format)
+            reference_count, reference_checksum = relation_summary(
+                args.duckdb, database, relation, f"ref_{relation['name']}"
+            )
+            matches = generated_count == reference_count and generated_checksum == reference_checksum
             rows.append((relation["name"], generated_count, generated_checksum, reference_count, reference_checksum, matches))
 
     writer = csv.writer(sys.stdout)
@@ -149,7 +152,7 @@ def main(argv: list[str]) -> int:
     for row in rows:
         writer.writerow(row)
 
-    if args.reference and not all(row[-1] for row in rows):
+    if not all(row[-1] for row in rows):
         return 1
     return 0
 

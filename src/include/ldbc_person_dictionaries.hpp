@@ -106,6 +106,16 @@ private:
 	vector<double> cumulative_distribution;
 };
 
+class LdbcPersonDeleteDistribution {
+public:
+	explicit LdbcPersonDeleteDistribution(const string &dictionary_dir);
+
+	bool IsDeleted(LdbcJavaRandom &random, int64_t max_knows) const;
+
+private:
+	vector<double> distribution;
+};
+
 class LdbcTagDictionary {
 public:
 	LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob);
@@ -179,6 +189,7 @@ public:
 	LdbcLanguageDictionary languages;
 	LdbcNamesDictionary names;
 	LdbcEmailDictionary emails;
+	LdbcPersonDeleteDistribution person_deletes;
 	LdbcTagDictionary tags;
 	LdbcTagMatrix tag_matrix;
 	LdbcCompanyDictionary companies;

@@ -15,6 +15,7 @@ namespace duckdb {
 enum class LdbcRandomAspect : uint8_t {
 	DATE = 0,
 	BIRTH_DAY = 1,
+	UNIFORM = 4,
 	GENDER = 18,
 	RANDOM = 19,
 	NUM_TAG = 6,
@@ -33,12 +34,13 @@ enum class LdbcRandomAspect : uint8_t {
 	COMPANY = 48,
 	UNCORRELATED_COMPANY = 49,
 	UNCORRELATED_COMPANY_LOCATION = 50,
-	LANGUAGE = 52,
-	NAME = 55,
-	SURNAME = 56,
-	TAG_OTHER_COUNTRY = 57,
-	TOPIC = 64,
-	DELETION_PERSON = 65,
+	LANGUAGE = 51,
+	NAME = 54,
+	SURNAME = 55,
+	TAG_OTHER_COUNTRY = 56,
+	TOPIC = 63,
+	DELETION_PERSON = 64,
+	DELETION_KNOWS = 65,
 	NUM_ASPECT = 72
 };
 
@@ -64,6 +66,12 @@ public:
 
 	int64_t RandomPersonCreationDate(LdbcJavaRandom &random) const;
 	int64_t RandomBirthday(LdbcJavaRandom &random) const;
+	int64_t RandomDate(LdbcJavaRandom &random, int64_t min_date, int64_t max_date) const;
+	int64_t RandomPersonDeletionDate(LdbcJavaRandom &random, int64_t creation_date, int64_t max_deletion_date) const;
+	int64_t RandomKnowsCreationDate(LdbcJavaRandom &random, int64_t person_a_creation, int64_t person_a_deletion,
+	                                int64_t person_b_creation, int64_t person_b_deletion) const;
+	int64_t RandomKnowsDeletionDate(LdbcJavaRandom &random, int64_t person_a_deletion, int64_t person_b_deletion,
+	                                int64_t knows_creation_date) const;
 	int64_t RandomClassYear(LdbcJavaRandom &random, int64_t birthday) const;
 	int64_t GetWorkFromYear(LdbcJavaRandom &random, int64_t class_year, int64_t birthday) const;
 	int64_t SimulationStart() const;
@@ -84,6 +92,9 @@ struct LdbcPersonCore {
 	int64_t creation_date;
 	int64_t account_id;
 	int64_t birthday;
+	int64_t deletion_date;
+	int64_t max_num_knows;
+	int32_t main_interest;
 	int8_t gender;
 	int32_t country_id;
 	int32_t city_id;
@@ -95,12 +106,41 @@ struct LdbcPersonCore {
 	string first_name;
 	string last_name;
 	bool message_deleter;
+	bool explicitly_deleted;
+	bool large_poster;
 	int64_t random_id;
 	vector<int32_t> interests;
 	int32_t university_location_id;
 	int64_t university_id;
 	int64_t class_year;
 	unordered_map<int64_t, int64_t> companies;
+};
+
+struct LdbcKnowsEdge {
+	int64_t creation_date;
+	int64_t deletion_date;
+	bool explicitly_deleted;
+	float weight;
+	int64_t person1_id;
+	int64_t person2_id;
+};
+
+class LdbcFacebookDegreeDistribution {
+public:
+	explicit LdbcFacebookDegreeDistribution(const LdbcDatagenConfig &config);
+
+	void Reset(int64_t seed);
+	int64_t NextDegree();
+
+private:
+	struct Bucket {
+		double min;
+		double max;
+	};
+
+	vector<Bucket> buckets;
+	vector<LdbcJavaRandom> random_degree;
+	LdbcJavaRandom random_percentile;
 };
 
 class LdbcPersonGenerator {
@@ -117,8 +157,12 @@ private:
 	LdbcDateGenerator dates;
 	LdbcPersonDictionaries dictionaries;
 	LdbcRandomGeneratorFarm random_farm;
+	LdbcFacebookDegreeDistribution degree_distribution;
 	int64_t current_block = -1;
 };
+
+vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
+vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms);
 date_t LdbcDateFromEpochMs(int64_t epoch_ms);
