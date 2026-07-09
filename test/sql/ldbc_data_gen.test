@@ -4,19 +4,50 @@
 
 # Before we load the extension, this will fail
 statement error
-SELECT * FROM ldbcgen(sf := 0.003);
+CALL ldbcgen(sf := 0.003);
 ----
 Catalog Error: Table Function with name ldbcgen does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
-# Confirm the table-function contract is registered.
-query TTTTTT
-SELECT relation_name, path, row_count, checksum, format, status
-FROM ldbcgen(sf := 0.003);
+# Confirm the CALL contract creates empty DuckDB tables.
+statement ok
+CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');
+
+query I
+SELECT COUNT(*)
+FROM duckdb_tables()
+WHERE schema_name = 'ldbc_test';
 ----
-ldbc_snb_bi_static	main	NULL	NULL	parquet	planned
+18
+
+query I
+SELECT COUNT(*)
+FROM duckdb_columns()
+WHERE schema_name = 'ldbc_test';
+----
+86
+
+query TTTT
+SELECT table_name, column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE schema_name = 'ldbc_test'
+  AND table_name = 'Post'
+  AND column_name IN ('creationDate', 'id', 'imageFile')
+ORDER BY column_index;
+----
+Post	creationDate	TIMESTAMP_MS	0
+Post	id	BIGINT	0
+Post	imageFile	VARCHAR	1
+
+statement error
+CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');
+----
+Catalog Error: Table with name "Organisation" already exists!
+
+statement ok
+CALL ldbcgen(sf := 0.003, schema := 'ldbc_test', overwrite := true);
 
 query TTTTTT
 SELECT relation_name, path, row_count, checksum, format, status
@@ -25,22 +56,22 @@ FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003', format
 ldbc_snb_bi_static	out/sf0.003	NULL	NULL	parquet	planned
 
 statement error
-SELECT * FROM ldbcgen(sf := 0);
+CALL ldbcgen(sf := 0);
 ----
 Binder Error: ldbcgen parameter sf must be greater than zero
 
 statement error
-SELECT * FROM ldbcgen(sf := 1, format := 'json');
+CALL ldbcgen(sf := 1, format := 'json');
 ----
 Binder Error: ldbcgen parameter format must be either 'parquet' or 'csv'
 
 statement error
-SELECT * FROM ldbcgen(sf := 1, target := 'files');
+CALL ldbcgen(sf := 1, target := 'files');
 ----
 Binder Error: ldbcgen parameter output_dir must be set when target is 'files'
 
 statement error
-SELECT * FROM ldbcgen(sf := 1, target := 'memory');
+CALL ldbcgen(sf := 1, target := 'memory');
 ----
 Binder Error: ldbcgen parameter target must be either 'tables' or 'files'
 

@@ -1,0 +1,246 @@
+{
+  "name": "ldbc_snb_bi_static",
+  "source": {
+    "repository": "https://github.com/ldbc/ldbc_snb_datagen_spark",
+    "submodule_path": "third_party/ldbc_snb_datagen_spark",
+    "commit": "b3dc986898efac7c1676abba865a30865334922e",
+    "schema_source": "src/main/scala/ldbc/snb/datagen/model/raw.scala",
+    "path_source": "src/main/scala/ldbc/snb/datagen/io/PathComponent.scala"
+  },
+  "mode": "bi",
+  "layout": "composite-merged-fk",
+  "snapshot_root": "graphs/{format}/bi/composite-merged-fk/initial_snapshot",
+  "first_reference_scale_factor": 0.003,
+  "relations": [
+    {
+      "name": "Organisation",
+      "entity_path": "static/Organisation",
+      "kind": "static_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "INTEGER", "nullable": false},
+        {"name": "type", "type": "VARCHAR", "nullable": false},
+        {"name": "name", "type": "VARCHAR", "nullable": false},
+        {"name": "url", "type": "VARCHAR", "nullable": false},
+        {"name": "LocationPlaceId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Place",
+      "entity_path": "static/Place",
+      "kind": "static_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "INTEGER", "nullable": false},
+        {"name": "name", "type": "VARCHAR", "nullable": false},
+        {"name": "url", "type": "VARCHAR", "nullable": false},
+        {"name": "type", "type": "VARCHAR", "nullable": false},
+        {"name": "PartOfPlaceId", "type": "INTEGER", "nullable": true}
+      ]
+    },
+    {
+      "name": "Tag",
+      "entity_path": "static/Tag",
+      "kind": "static_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "INTEGER", "nullable": false},
+        {"name": "name", "type": "VARCHAR", "nullable": false},
+        {"name": "url", "type": "VARCHAR", "nullable": false},
+        {"name": "TypeTagClassId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "TagClass",
+      "entity_path": "static/TagClass",
+      "kind": "static_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "id", "type": "INTEGER", "nullable": false},
+        {"name": "name", "type": "VARCHAR", "nullable": false},
+        {"name": "url", "type": "VARCHAR", "nullable": false},
+        {"name": "SubclassOfTagClassId", "type": "INTEGER", "nullable": true}
+      ]
+    },
+    {
+      "name": "Person",
+      "entity_path": "dynamic/Person",
+      "kind": "dynamic_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "id", "type": "BIGINT", "nullable": false},
+        {"name": "firstName", "type": "VARCHAR", "nullable": false},
+        {"name": "lastName", "type": "VARCHAR", "nullable": false},
+        {"name": "gender", "type": "VARCHAR", "nullable": false},
+        {"name": "birthday", "type": "DATE", "nullable": false},
+        {"name": "locationIP", "type": "VARCHAR", "nullable": false},
+        {"name": "browserUsed", "type": "VARCHAR", "nullable": false},
+        {"name": "LocationCityId", "type": "INTEGER", "nullable": false},
+        {"name": "language", "type": "VARCHAR", "nullable": false},
+        {"name": "email", "type": "VARCHAR", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_hasInterest_Tag",
+      "entity_path": "dynamic/Person_hasInterest_Tag",
+      "kind": "dynamic_edge",
+      "primary_key": ["PersonId", "TagId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false},
+        {"name": "TagId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_knows_Person",
+      "entity_path": "dynamic/Person_knows_Person",
+      "kind": "dynamic_edge",
+      "primary_key": ["Person1Id", "Person2Id"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "Person1Id", "type": "BIGINT", "nullable": false},
+        {"name": "Person2Id", "type": "BIGINT", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_studyAt_University",
+      "entity_path": "dynamic/Person_studyAt_University",
+      "kind": "dynamic_edge",
+      "primary_key": ["PersonId", "UniversityId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false},
+        {"name": "UniversityId", "type": "BIGINT", "nullable": false},
+        {"name": "classYear", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_workAt_Company",
+      "entity_path": "dynamic/Person_workAt_Company",
+      "kind": "dynamic_edge",
+      "primary_key": ["PersonId", "CompanyId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false},
+        {"name": "CompanyId", "type": "BIGINT", "nullable": false},
+        {"name": "workFrom", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Forum",
+      "entity_path": "dynamic/Forum",
+      "kind": "dynamic_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "id", "type": "BIGINT", "nullable": false},
+        {"name": "title", "type": "VARCHAR", "nullable": false},
+        {"name": "ModeratorPersonId", "type": "BIGINT", "nullable": false}
+      ]
+    },
+    {
+      "name": "Forum_hasMember_Person",
+      "entity_path": "dynamic/Forum_hasMember_Person",
+      "kind": "dynamic_edge",
+      "primary_key": ["ForumId", "PersonId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "ForumId", "type": "BIGINT", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false}
+      ]
+    },
+    {
+      "name": "Forum_hasTag_Tag",
+      "entity_path": "dynamic/Forum_hasTag_Tag",
+      "kind": "dynamic_edge",
+      "primary_key": ["ForumId", "TagId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "ForumId", "type": "BIGINT", "nullable": false},
+        {"name": "TagId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Comment",
+      "entity_path": "dynamic/Comment",
+      "kind": "dynamic_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "id", "type": "BIGINT", "nullable": false},
+        {"name": "locationIP", "type": "VARCHAR", "nullable": false},
+        {"name": "browserUsed", "type": "VARCHAR", "nullable": false},
+        {"name": "content", "type": "VARCHAR", "nullable": false},
+        {"name": "length", "type": "INTEGER", "nullable": false},
+        {"name": "CreatorPersonId", "type": "BIGINT", "nullable": false},
+        {"name": "LocationCountryId", "type": "INTEGER", "nullable": false},
+        {"name": "ParentPostId", "type": "BIGINT", "nullable": true},
+        {"name": "ParentCommentId", "type": "BIGINT", "nullable": true}
+      ]
+    },
+    {
+      "name": "Comment_hasTag_Tag",
+      "entity_path": "dynamic/Comment_hasTag_Tag",
+      "kind": "dynamic_edge",
+      "primary_key": ["CommentId", "TagId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "CommentId", "type": "BIGINT", "nullable": false},
+        {"name": "TagId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Post",
+      "entity_path": "dynamic/Post",
+      "kind": "dynamic_node",
+      "primary_key": ["id"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "id", "type": "BIGINT", "nullable": false},
+        {"name": "imageFile", "type": "VARCHAR", "nullable": true},
+        {"name": "locationIP", "type": "VARCHAR", "nullable": false},
+        {"name": "browserUsed", "type": "VARCHAR", "nullable": false},
+        {"name": "language", "type": "VARCHAR", "nullable": true},
+        {"name": "content", "type": "VARCHAR", "nullable": true},
+        {"name": "length", "type": "INTEGER", "nullable": false},
+        {"name": "CreatorPersonId", "type": "BIGINT", "nullable": false},
+        {"name": "ContainerForumId", "type": "BIGINT", "nullable": false},
+        {"name": "LocationCountryId", "type": "BIGINT", "nullable": false}
+      ]
+    },
+    {
+      "name": "Post_hasTag_Tag",
+      "entity_path": "dynamic/Post_hasTag_Tag",
+      "kind": "dynamic_edge",
+      "primary_key": ["PostId", "TagId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PostId", "type": "BIGINT", "nullable": false},
+        {"name": "TagId", "type": "INTEGER", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_likes_Post",
+      "entity_path": "dynamic/Person_likes_Post",
+      "kind": "dynamic_edge",
+      "primary_key": ["PersonId", "PostId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false},
+        {"name": "PostId", "type": "BIGINT", "nullable": false}
+      ]
+    },
+    {
+      "name": "Person_likes_Comment",
+      "entity_path": "dynamic/Person_likes_Comment",
+      "kind": "dynamic_edge",
+      "primary_key": ["PersonId", "CommentId"],
+      "columns": [
+        {"name": "creationDate", "type": "TIMESTAMP_MS", "nullable": false},
+        {"name": "PersonId", "type": "BIGINT", "nullable": false},
+        {"name": "CommentId", "type": "BIGINT", "nullable": false}
+      ]
+    }
+  ]
+}

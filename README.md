@@ -17,8 +17,7 @@ The extension currently registers the north-star table-function contract:
 ```sql
 LOAD ldbc_data_gen;
 
-SELECT *
-FROM ldbcgen(
+CALL ldbcgen(
     sf := 1.0,
     target := 'tables',
     schema := 'main',
@@ -27,7 +26,7 @@ FROM ldbcgen(
 );
 ```
 
-The current implementation validates parameters and returns one `planned` metadata row. It does not generate data yet.
+The current implementation validates parameters and creates the BI static tables with the correct columns and zero rows.
 
 Returned columns:
 
@@ -38,13 +37,12 @@ Returned columns:
 | `row_count` | `BIGINT` | Generated row count, nullable while planning |
 | `checksum` | `VARCHAR` | Stable content checksum, nullable while planning |
 | `format` | `VARCHAR` | `parquet` or `csv` |
-| `status` | `VARCHAR` | Current generation status |
+| `status` | `VARCHAR` | `created`, `recreated`, or `planned` |
 
 The default generation target is in-database DuckDB tables. File output is explicit:
 
 ```sql
-SELECT *
-FROM ldbcgen(
+CALL ldbcgen(
     sf := 1.0,
     target := 'files',
     output_dir := 'out/sf1',

@@ -2,8 +2,18 @@
 
 #include "ldbc_data_gen_extension.hpp"
 #include "duckdb.hpp"
+#include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
+#include "duckdb/main/client_data.hpp"
+#include "duckdb/main/database_manager.hpp"
+#include "duckdb/parser/constraints/not_null_constraint.hpp"
+#include "duckdb/parser/constraints/unique_constraint.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/catalog/catalog_search_path.hpp"
+#include "duckdb/planner/binder.hpp"
 
 namespace duckdb {
 
@@ -135,6 +145,7 @@ static constexpr LdbcSchemaColumn LDBC_BI_STATIC_SCHEMA[] = {
 
 struct LdbcGenBindData : public TableFunctionData {
 	double scale_factor = 1.0;
+	string catalog = INVALID_CATALOG;
 	string output_dir;
 	string target = "tables";
 	string schema = "main";
@@ -143,7 +154,8 @@ struct LdbcGenBindData : public TableFunctionData {
 };
 
 struct LdbcGenGlobalState : public GlobalTableFunctionState {
-	bool emitted = false;
+	bool materialized = false;
+	idx_t offset = 0;
 };
 
 struct LdbcGenSchemaBindData : public TableFunctionData {
@@ -178,6 +190,129 @@ static bool GetBooleanParameter(TableFunctionBindInput &input, const string &nam
 	return entry->second.GetValue<bool>();
 }
 
+static LogicalType LdbcLogicalType(const string &type) {
+	if (type == "BIGINT") {
+		return LogicalType::BIGINT;
+	}
+	if (type == "INTEGER") {
+		return LogicalType::INTEGER;
+	}
+	if (type == "VARCHAR") {
+		return LogicalType::VARCHAR;
+	}
+	if (type == "DATE") {
+		return LogicalType::DATE;
+	}
+	if (type == "TIMESTAMP_MS") {
+		return LogicalType::TIMESTAMP_MS;
+	}
+	throw InternalException("Unsupported LDBC schema type: %s", type);
+}
+
+static idx_t LdbcSchemaSize() {
+	return sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]);
+}
+
+static vector<string> SplitPrimaryKey(const string &primary_key) {
+	vector<string> result;
+	string current;
+	for (auto c : primary_key) {
+		if (c == ',') {
+			result.push_back(current);
+			current.clear();
+		} else {
+			current += c;
+		}
+	}
+	if (!current.empty()) {
+		result.push_back(current);
+	}
+	return result;
+}
+
+static void CreateSchemaIfNeeded(ClientContext &context, const string &catalog_name, const string &schema) {
+	auto &catalog = Catalog::GetCatalog(context, catalog_name);
+	CreateSchemaInfo info;
+	info.catalog = catalog_name;
+	info.schema = schema;
+	info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
+	catalog.CreateSchema(context, info);
+}
+
+static void DropTableIfNeeded(ClientContext &context, const string &catalog_name, const string &schema,
+                              const string &table_name) {
+	DropInfo drop_info;
+	drop_info.type = CatalogType::TABLE_ENTRY;
+	drop_info.catalog = catalog_name;
+	drop_info.schema = schema;
+	drop_info.name = table_name;
+	drop_info.if_not_found = OnEntryNotFound::RETURN_NULL;
+	Catalog::GetCatalog(context, catalog_name).DropEntry(context, drop_info);
+}
+
+static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begin, const LdbcSchemaColumn *end,
+                            const string &catalog_name, const string &schema, bool overwrite) {
+	auto table_name = string(begin->relation_name);
+	if (overwrite) {
+		DropTableIfNeeded(context, catalog_name, schema, table_name);
+	}
+
+	auto table_info = make_uniq<CreateTableInfo>(catalog_name, schema, table_name);
+	idx_t column_index = 0;
+	for (auto column = begin; column != end; column++) {
+		table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
+		if (!column->nullable) {
+			table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_index)));
+		}
+		column_index++;
+	}
+	table_info->constraints.push_back(make_uniq<UniqueConstraint>(SplitPrimaryKey(begin->primary_key), true));
+	Catalog::GetCatalog(context, catalog_name).CreateTable(context, std::move(table_info));
+}
+
+static idx_t LdbcRelationCount() {
+	idx_t count = 0;
+	const char *previous_relation = nullptr;
+	for (idx_t row_idx = 0; row_idx < LdbcSchemaSize(); row_idx++) {
+		auto &row = LDBC_BI_STATIC_SCHEMA[row_idx];
+		if (!previous_relation || string(previous_relation) != row.relation_name) {
+			count++;
+			previous_relation = row.relation_name;
+		}
+	}
+	return count;
+}
+
+static const LdbcSchemaColumn &LdbcRelationAt(idx_t relation_index) {
+	idx_t current_relation = DConstants::INVALID_INDEX;
+	const char *previous_relation = nullptr;
+	for (idx_t row_idx = 0; row_idx < LdbcSchemaSize(); row_idx++) {
+		auto &row = LDBC_BI_STATIC_SCHEMA[row_idx];
+		if (!previous_relation || string(previous_relation) != row.relation_name) {
+			current_relation++;
+			previous_relation = row.relation_name;
+			if (current_relation == relation_index) {
+				return row;
+			}
+		}
+	}
+	throw InternalException("LDBC relation index out of range");
+}
+
+static void MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+	CreateSchemaIfNeeded(context, bind_data.catalog, bind_data.schema);
+
+	idx_t relation_start = 0;
+	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
+		if (row_idx == LdbcSchemaSize() ||
+		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx,
+			                bind_data.catalog, bind_data.schema, bind_data.overwrite);
+			relation_start = row_idx;
+		}
+	}
+}
+
 static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctionBindInput &input,
                                             vector<LogicalType> &return_types, vector<string> &names) {
 	if (!input.inputs.empty()) {
@@ -185,10 +320,13 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	}
 
 	auto result = make_uniq<LdbcGenBindData>();
+	result->catalog = DatabaseManager::GetDefaultDatabase(context);
+	result->schema = ClientData::Get(context).catalog_search_path->GetDefault().schema;
 	result->scale_factor = GetDoubleParameter(input, "sf", 1.0);
+	result->catalog = GetStringParameter(input, "catalog", result->catalog);
 	result->output_dir = GetStringParameter(input, "output_dir", "");
 	result->target = StringUtil::Lower(GetStringParameter(input, "target", "tables"));
-	result->schema = GetStringParameter(input, "schema", "main");
+	result->schema = GetStringParameter(input, "schema", result->schema);
 	result->format = StringUtil::Lower(GetStringParameter(input, "format", "parquet"));
 	result->overwrite = GetBooleanParameter(input, "overwrite", false);
 
@@ -206,6 +344,13 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	}
 	if (result->format != "parquet" && result->format != "csv") {
 		throw BinderException("ldbcgen parameter format must be either 'parquet' or 'csv'");
+	}
+	if (input.binder && result->target == "tables") {
+		auto &catalog = Catalog::GetCatalog(context, result->catalog);
+		auto &properties = input.binder->GetStatementProperties();
+		DatabaseModificationType modification;
+		modification |= DatabaseModificationType::CREATE_CATALOG_ENTRY;
+		properties.RegisterDBModify(catalog, context, modification);
 	}
 
 	names.emplace_back("relation_name");
@@ -231,19 +376,40 @@ static unique_ptr<GlobalTableFunctionState> LdbcGenInit(ClientContext &context, 
 static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
 	auto &bind_data = data_p.bind_data->Cast<LdbcGenBindData>();
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
-	if (state.emitted) {
+
+	if (bind_data.target == "tables" && !state.materialized) {
+		MaterializeLdbcTables(context, bind_data);
+		state.materialized = true;
+	}
+
+	if (state.offset >= (bind_data.target == "tables" ? LdbcRelationCount() : 1)) {
 		return;
 	}
 
-	auto path = bind_data.target == "tables" ? bind_data.schema : bind_data.output_dir;
-	output.data[0].SetValue(0, "ldbc_snb_bi_static");
-	output.data[1].SetValue(0, path);
-	output.data[2].SetValue(0, Value(LogicalType::BIGINT));
-	output.data[3].SetValue(0, Value(LogicalType::VARCHAR));
-	output.data[4].SetValue(0, bind_data.format);
-	output.data[5].SetValue(0, "planned");
-	output.SetCardinality(1);
-	state.emitted = true;
+	idx_t count = 0;
+	if (bind_data.target == "files") {
+		output.data[0].SetValue(0, "ldbc_snb_bi_static");
+		output.data[1].SetValue(0, bind_data.output_dir);
+		output.data[2].SetValue(0, Value(LogicalType::BIGINT));
+		output.data[3].SetValue(0, Value(LogicalType::VARCHAR));
+		output.data[4].SetValue(0, bind_data.format);
+		output.data[5].SetValue(0, "planned");
+		count = 1;
+		state.offset = 1;
+	} else {
+		while (state.offset < LdbcRelationCount() && count < STANDARD_VECTOR_SIZE) {
+			auto &relation = LdbcRelationAt(state.offset);
+			output.data[0].SetValue(count, relation.relation_name);
+			output.data[1].SetValue(count, bind_data.catalog + "." + bind_data.schema + "." + string(relation.relation_name));
+			output.data[2].SetValue(count, Value::BIGINT(0));
+			output.data[3].SetValue(count, Value(LogicalType::VARCHAR));
+			output.data[4].SetValue(count, "table");
+			output.data[5].SetValue(count, bind_data.overwrite ? "recreated" : "created");
+			count++;
+			state.offset++;
+		}
+	}
+	output.SetCardinality(count);
 }
 
 static unique_ptr<FunctionData> LdbcGenSchemaBind(ClientContext &context, TableFunctionBindInput &input,
@@ -333,6 +499,7 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen("ldbcgen", {}, LdbcGenFunction, LdbcGenBind, LdbcGenInit);
 	ldbcgen.named_parameters["sf"] = LogicalType::DOUBLE;
+	ldbcgen.named_parameters["catalog"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["output_dir"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["target"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["schema"] = LogicalType::VARCHAR;
