@@ -7,6 +7,8 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_data.hpp"
 #include "duckdb/main/database_manager.hpp"
+#include "duckdb/main/appender.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/parser/constraints/not_null_constraint.hpp"
 #include "duckdb/parser/constraints/unique_constraint.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
@@ -14,6 +16,10 @@
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/catalog/catalog_search_path.hpp"
 #include "duckdb/planner/binder.hpp"
+
+#include <fstream>
+#include <set>
+#include <unordered_map>
 
 namespace duckdb {
 
@@ -150,12 +156,14 @@ struct LdbcGenBindData : public TableFunctionData {
 	string target = "tables";
 	string schema = "main";
 	string format = "parquet";
+	string dictionary_dir = "third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries";
 	bool overwrite = false;
 };
 
 struct LdbcGenGlobalState : public GlobalTableFunctionState {
 	bool materialized = false;
 	idx_t offset = 0;
+	unordered_map<string, idx_t> row_counts;
 };
 
 struct LdbcGenSchemaBindData : public TableFunctionData {
@@ -270,6 +278,370 @@ static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begi
 	Catalog::GetCatalog(context, catalog_name).CreateTable(context, std::move(table_info));
 }
 
+static string DictionaryPath(const LdbcGenBindData &bind_data, const string &file_name) {
+	if (bind_data.dictionary_dir.empty()) {
+		throw InvalidInputException("ldbcgen parameter dictionary_dir must not be empty");
+	}
+	if (bind_data.dictionary_dir.back() == '/') {
+		return bind_data.dictionary_dir + file_name;
+	}
+	return bind_data.dictionary_dir + "/" + file_name;
+}
+
+static std::ifstream OpenDictionaryFile(const LdbcGenBindData &bind_data, const string &file_name) {
+	auto path = DictionaryPath(bind_data, file_name);
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		throw IOException("Could not open LDBC dictionary file '%s'", path);
+	}
+	return file;
+}
+
+static string StripCarriageReturn(string value) {
+	if (!value.empty() && value.back() == '\r') {
+		value.pop_back();
+	}
+	return value;
+}
+
+static string TrimWhitespace(const string &value) {
+	idx_t start = 0;
+	while (start < value.size() && StringUtil::CharacterIsSpace(value[start])) {
+		start++;
+	}
+	idx_t end = value.size();
+	while (end > start && StringUtil::CharacterIsSpace(value[end - 1])) {
+		end--;
+	}
+	return value.substr(start, end - start);
+}
+
+static string ClampString(const string &value, idx_t max_length) {
+	if (value.size() <= max_length) {
+		return value;
+	}
+	return value.substr(0, max_length);
+}
+
+static string ReplaceAll(string value, const string &needle, const string &replacement) {
+	idx_t offset = 0;
+	while ((offset = value.find(needle, offset)) != string::npos) {
+		value.replace(offset, needle.size(), replacement);
+		offset += replacement.size();
+	}
+	return value;
+}
+
+static vector<string> SplitByWhitespace(const string &line) {
+	vector<string> result;
+	string current;
+	for (auto c : line) {
+		if (c == ' ' || c == '\t') {
+			if (!current.empty()) {
+				result.push_back(current);
+				current.clear();
+			}
+		} else {
+			current += c;
+		}
+	}
+	if (!current.empty()) {
+		result.push_back(current);
+	}
+	return result;
+}
+
+static vector<string> SplitByDelimiter(const string &line, const string &delimiter) {
+	vector<string> result;
+	idx_t offset = 0;
+	while (true) {
+		auto next = line.find(delimiter, offset);
+		if (next == string::npos) {
+			result.push_back(line.substr(offset));
+			return result;
+		}
+		result.push_back(line.substr(offset, next - offset));
+		offset = next + delimiter.size();
+	}
+}
+
+struct StaticPlaceRecord {
+	StaticPlaceRecord(int32_t id, string name, string type, int32_t part_of_place_id)
+	    : id(id), name(std::move(name)), type(std::move(type)), part_of_place_id(part_of_place_id) {
+	}
+
+	int32_t id;
+	string name;
+	string type;
+	int32_t part_of_place_id = -1;
+};
+
+struct StaticDictionaryData {
+	vector<StaticPlaceRecord> places;
+	unordered_map<string, int32_t> country_ids;
+	unordered_map<string, int32_t> city_ids;
+	unordered_map<int32_t, string> tag_class_names;
+	unordered_map<int32_t, int32_t> tag_class_parent;
+	unordered_map<int32_t, string> tag_names;
+	unordered_map<int32_t, int32_t> tag_classes;
+};
+
+static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind_data) {
+	StaticDictionaryData data;
+	unordered_map<string, int32_t> continent_ids;
+
+	string line;
+	auto locations = OpenDictionaryFile(bind_data, "dicLocations.txt");
+	while (std::getline(locations, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByWhitespace(line);
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed dicLocations.txt line: '%s'", line);
+		}
+		auto &country = columns[1];
+		if (data.country_ids.find(country) == data.country_ids.end()) {
+			auto id = NumericCast<int32_t>(data.places.size());
+			data.country_ids[country] = id;
+			data.places.push_back(StaticPlaceRecord(id, country, "Country", -1));
+		}
+	}
+
+	auto cities = OpenDictionaryFile(bind_data, "citiesByCountry.txt");
+	while (std::getline(cities, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByWhitespace(line);
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed citiesByCountry.txt line: '%s'", line);
+		}
+		auto country_entry = data.country_ids.find(columns[0]);
+		if (country_entry != data.country_ids.end() && data.city_ids.find(columns[1]) == data.city_ids.end()) {
+			auto id = NumericCast<int32_t>(data.places.size());
+			data.city_ids[columns[1]] = id;
+			data.places.push_back(StaticPlaceRecord(id, columns[1], "City", country_entry->second));
+		}
+	}
+
+	locations = OpenDictionaryFile(bind_data, "dicLocations.txt");
+	while (std::getline(locations, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByWhitespace(line);
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed dicLocations.txt line: '%s'", line);
+		}
+		auto &continent = columns[0];
+		if (continent_ids.find(continent) == continent_ids.end()) {
+			auto id = NumericCast<int32_t>(data.places.size());
+			continent_ids[continent] = id;
+			data.places.push_back(StaticPlaceRecord(id, continent, "Continent", -1));
+		}
+		data.places[data.country_ids[columns[1]]].part_of_place_id = continent_ids[continent];
+	}
+
+	auto tag_classes = OpenDictionaryFile(bind_data, "tagClasses.txt");
+	while (std::getline(tag_classes, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiter(line, "\t");
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed tagClasses.txt line: '%s'", line);
+		}
+		data.tag_class_names[std::stoi(columns[0])] = columns[1];
+	}
+
+	auto tag_hierarchy = OpenDictionaryFile(bind_data, "tagClassHierarchy.txt");
+	while (std::getline(tag_hierarchy, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiter(line, "\t");
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed tagClassHierarchy.txt line: '%s'", line);
+		}
+		data.tag_class_parent[std::stoi(columns[0])] = std::stoi(columns[1]);
+	}
+
+	auto tags = OpenDictionaryFile(bind_data, "tags.txt");
+	while (std::getline(tags, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiter(line, "\t");
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed tags.txt line: '%s'", line);
+		}
+		auto tag_id = std::stoi(columns[0]);
+		data.tag_classes[tag_id] = std::stoi(columns[1]);
+		data.tag_names[tag_id] = columns[2];
+	}
+
+	return data;
+}
+
+static unique_ptr<InternalAppender> MakeStaticAppender(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                       const string &table_name) {
+	auto &catalog = Catalog::GetCatalog(context, bind_data.catalog);
+	auto &table = catalog.GetEntry<TableCatalogEntry>(context, bind_data.schema, table_name);
+	if (!table.IsDuckTable()) {
+		throw InvalidInputException("ldbcgen can only append generated data to DuckDB tables");
+	}
+	return make_uniq<InternalAppender>(context, table);
+}
+
+static idx_t AppendPlaces(ClientContext &context, const LdbcGenBindData &bind_data, const StaticDictionaryData &data) {
+	auto appender = MakeStaticAppender(context, bind_data, "Place");
+	for (auto &place : data.places) {
+		appender->BeginRow();
+		appender->Append<int32_t>(place.id);
+		appender->Append(Value(ClampString(place.name, 256)));
+		appender->Append(Value("http://dbpedia.org/resource/" + place.name));
+		appender->Append(Value(place.type));
+		if (place.part_of_place_id == -1) {
+			appender->Append(Value());
+		} else {
+			appender->Append<int32_t>(place.part_of_place_id);
+		}
+		appender->EndRow();
+	}
+	appender->Close();
+	return data.places.size();
+}
+
+static idx_t AppendTags(ClientContext &context, const LdbcGenBindData &bind_data, const StaticDictionaryData &data) {
+	auto appender = MakeStaticAppender(context, bind_data, "Tag");
+	std::set<int32_t> tag_ids;
+	for (auto &entry : data.tag_names) {
+		tag_ids.insert(entry.first);
+	}
+	for (auto tag_id : tag_ids) {
+		auto name = ReplaceAll(ClampString(data.tag_names.at(tag_id), 256), "\"", "\\\"");
+		appender->BeginRow();
+		appender->Append<int32_t>(tag_id);
+		appender->Append(Value(name));
+		appender->Append(Value("http://dbpedia.org/resource/" + name));
+		appender->Append<int32_t>(data.tag_classes.at(tag_id));
+		appender->EndRow();
+	}
+	appender->Close();
+	return tag_ids.size();
+}
+
+static idx_t AppendTagClasses(ClientContext &context, const LdbcGenBindData &bind_data,
+                              const StaticDictionaryData &data) {
+	std::set<int32_t> reachable_classes;
+	for (auto &tag_class : data.tag_classes) {
+		auto class_id = tag_class.second;
+		while (class_id != -1) {
+			if (!reachable_classes.insert(class_id).second) {
+				break;
+			}
+			auto parent = data.tag_class_parent.find(class_id);
+			class_id = parent == data.tag_class_parent.end() ? -1 : parent->second;
+		}
+	}
+
+	auto appender = MakeStaticAppender(context, bind_data, "TagClass");
+	for (auto class_id : reachable_classes) {
+		auto name = ClampString(data.tag_class_names.at(class_id), 256);
+		appender->BeginRow();
+		appender->Append<int32_t>(class_id);
+		appender->Append(Value(name));
+		appender->Append(Value(name == "Thing" ? string("http://www.w3.org/2002/07/owl#Thing")
+		                                      : "http://dbpedia.org/ontology/" + name));
+		auto parent = data.tag_class_parent.find(class_id);
+		if (parent == data.tag_class_parent.end()) {
+			appender->Append(Value());
+		} else {
+			appender->Append<int32_t>(parent->second);
+		}
+		appender->EndRow();
+	}
+	appender->Close();
+	return reachable_classes.size();
+}
+
+static idx_t AppendOrganisations(ClientContext &context, const LdbcGenBindData &bind_data,
+                                 const StaticDictionaryData &data) {
+	auto appender = MakeStaticAppender(context, bind_data, "Organisation");
+	idx_t row_count = 0;
+	string line;
+
+	auto companies = OpenDictionaryFile(bind_data, "companiesByCountry.txt");
+	while (std::getline(companies, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiter(line, "  ");
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed companiesByCountry.txt line: '%s'", line);
+		}
+		auto country = data.country_ids.find(columns[0]);
+		if (country == data.country_ids.end()) {
+			continue;
+		}
+		auto name = ClampString(TrimWhitespace(columns[1]), 256);
+		appender->BeginRow();
+		appender->Append<int32_t>(NumericCast<int32_t>(row_count));
+		appender->Append(Value("Company"));
+		appender->Append(Value(name));
+		appender->Append(Value("http://dbpedia.org/resource/" + name));
+		appender->Append<int32_t>(country->second);
+		appender->EndRow();
+		row_count++;
+	}
+
+	auto universities = OpenDictionaryFile(bind_data, "universities.txt");
+	while (std::getline(universities, line)) {
+		line = StripCarriageReturn(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiter(line, "  ");
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed universities.txt line: '%s'", line);
+		}
+		auto country = data.country_ids.find(columns[0]);
+		auto city = data.city_ids.find(columns[2]);
+		if (country == data.country_ids.end() || city == data.city_ids.end()) {
+			continue;
+		}
+		auto name = ClampString(TrimWhitespace(columns[1]), 256);
+		appender->BeginRow();
+		appender->Append<int32_t>(NumericCast<int32_t>(row_count));
+		appender->Append(Value("University"));
+		appender->Append(Value(name));
+		appender->Append(Value("http://dbpedia.org/resource/" + name));
+		appender->Append<int32_t>(city->second);
+		appender->EndRow();
+		row_count++;
+	}
+	appender->Close();
+	return row_count;
+}
+
+static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+	auto data = LoadStaticDictionaryData(bind_data);
+	unordered_map<string, idx_t> row_counts;
+	row_counts["Place"] = AppendPlaces(context, bind_data, data);
+	row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
+	row_counts["Tag"] = AppendTags(context, bind_data, data);
+	row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
+	return row_counts;
+}
+
 static idx_t LdbcRelationCount() {
 	idx_t count = 0;
 	const char *previous_relation = nullptr;
@@ -299,7 +671,7 @@ static const LdbcSchemaColumn &LdbcRelationAt(idx_t relation_index) {
 	throw InternalException("LDBC relation index out of range");
 }
 
-static void MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
 	CreateSchemaIfNeeded(context, bind_data.catalog, bind_data.schema);
 
 	idx_t relation_start = 0;
@@ -311,6 +683,7 @@ static void MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData 
 			relation_start = row_idx;
 		}
 	}
+	return PopulateStaticTables(context, bind_data);
 }
 
 static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctionBindInput &input,
@@ -328,6 +701,7 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	result->target = StringUtil::Lower(GetStringParameter(input, "target", "tables"));
 	result->schema = GetStringParameter(input, "schema", result->schema);
 	result->format = StringUtil::Lower(GetStringParameter(input, "format", "parquet"));
+	result->dictionary_dir = GetStringParameter(input, "dictionary_dir", result->dictionary_dir);
 	result->overwrite = GetBooleanParameter(input, "overwrite", false);
 
 	if (result->scale_factor <= 0) {
@@ -350,6 +724,7 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 		auto &properties = input.binder->GetStatementProperties();
 		DatabaseModificationType modification;
 		modification |= DatabaseModificationType::CREATE_CATALOG_ENTRY;
+		modification |= DatabaseModificationType::INSERT_DATA;
 		properties.RegisterDBModify(catalog, context, modification);
 	}
 
@@ -378,7 +753,7 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
 
 	if (bind_data.target == "tables" && !state.materialized) {
-		MaterializeLdbcTables(context, bind_data);
+		state.row_counts = MaterializeLdbcTables(context, bind_data);
 		state.materialized = true;
 	}
 
@@ -401,7 +776,8 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			auto &relation = LdbcRelationAt(state.offset);
 			output.data[0].SetValue(count, relation.relation_name);
 			output.data[1].SetValue(count, bind_data.catalog + "." + bind_data.schema + "." + string(relation.relation_name));
-			output.data[2].SetValue(count, Value::BIGINT(0));
+			auto row_count = state.row_counts.find(relation.relation_name);
+			output.data[2].SetValue(count, Value::BIGINT(row_count == state.row_counts.end() ? 0 : row_count->second));
 			output.data[3].SetValue(count, Value(LogicalType::VARCHAR));
 			output.data[4].SetValue(count, "table");
 			output.data[5].SetValue(count, bind_data.overwrite ? "recreated" : "created");
@@ -504,6 +880,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	ldbcgen.named_parameters["target"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["schema"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["format"] = LogicalType::VARCHAR;
+	ldbcgen.named_parameters["dictionary_dir"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["overwrite"] = LogicalType::BOOLEAN;
 	loader.RegisterFunction(ldbcgen);
 

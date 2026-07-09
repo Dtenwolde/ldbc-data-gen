@@ -11,7 +11,19 @@ Catalog Error: Table Function with name ldbcgen does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
-# Confirm the CALL contract creates empty DuckDB tables.
+# Confirm table generation returns static dictionary row counts.
+query TI
+SELECT relation_name, row_count
+FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
+WHERE relation_name IN ('Organisation', 'Place', 'Tag', 'TagClass')
+ORDER BY relation_name;
+----
+Organisation	7955
+Place	1460
+Tag	16080
+TagClass	71
+
+# Confirm the CALL contract creates DuckDB tables.
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');
 
@@ -40,6 +52,46 @@ ORDER BY column_index;
 Post	creationDate	TIMESTAMP_MS	0
 Post	id	BIGINT	0
 Post	imageFile	VARCHAR	1
+
+query TI
+SELECT 'Organisation' AS relation_name, COUNT(*) AS row_count FROM ldbc_test.Organisation
+UNION ALL SELECT 'Place', COUNT(*) FROM ldbc_test.Place
+UNION ALL SELECT 'Tag', COUNT(*) FROM ldbc_test.Tag
+UNION ALL SELECT 'TagClass', COUNT(*) FROM ldbc_test.TagClass
+ORDER BY relation_name;
+----
+Organisation	7955
+Place	1460
+Tag	16080
+TagClass	71
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Place child
+LEFT JOIN ldbc_test.Place parent
+  ON child.PartOfPlaceId = parent.id
+WHERE child.PartOfPlaceId IS NOT NULL
+  AND parent.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Tag tag
+LEFT JOIN ldbc_test.TagClass tag_class
+  ON tag.TypeTagClassId = tag_class.id
+WHERE tag_class.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Organisation organisation
+LEFT JOIN ldbc_test.Place place
+  ON organisation.LocationPlaceId = place.id
+WHERE place.id IS NULL;
+----
+0
 
 statement error
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');

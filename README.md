@@ -2,6 +2,8 @@
 
 This extension is intended to generate LDBC SNB datasets with DuckDB instead of Spark.
 
+This is an independent project and is not affiliated with, endorsed by, or maintained by the Linked Data Benchmark Council (LDBC).
+
 The pinned source of truth for the first milestone is the Spark-based LDBC SNB Datagen:
 
 ```text
@@ -22,11 +24,12 @@ CALL ldbcgen(
     target := 'tables',
     schema := 'main',
     format := 'parquet',
-    overwrite := false
+    overwrite := false,
+    dictionary_dir := 'third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries'
 );
 ```
 
-The current implementation validates parameters and creates the BI static tables with the correct columns and zero rows.
+The current implementation validates parameters, creates the BI static tables, populates the static dictionary-backed tables (`Place`, `TagClass`, `Tag`, `Organisation`), and leaves dynamic tables empty.
 
 Returned columns:
 
