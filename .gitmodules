@@ -6,3 +6,6 @@
 	path = extension-ci-tools
 	url = https://github.com/duckdb/extension-ci-tools
 	branch = main
+[submodule "third_party/ldbc_snb_datagen_spark"]
+	path = third_party/ldbc_snb_datagen_spark
+	url = https://github.com/ldbc/ldbc_snb_datagen_spark.git

@@ -4,20 +4,26 @@
 
 # Before we load the extension, this will fail
 statement error
-SELECT ldbc_data_gen('Sam');
+SELECT * FROM ldbcgen(sf := 0.003);
 ----
-Catalog Error: Scalar Function with name ldbc_data_gen does not exist!
+Catalog Error: Table Function with name ldbcgen does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
-# Confirm the extension works
-query I
-SELECT ldbc_data_gen('Sam');
+# Confirm the table-function contract is registered.
+query TTTTTT
+SELECT relation_name, path, row_count, checksum, format, status
+FROM ldbcgen(sf := 0.003, output_dir := 'out/sf0.003', format := 'parquet', overwrite := false);
 ----
-...........🦆 Sam
+ldbc_snb_bi_static	out/sf0.003	NULL	NULL	parquet	planned
 
-query I
-SELECT ldbc_data_gen_openssl_version('Michael') ILIKE 'LdbcDataGen Michael, my linked OpenSSL version is OpenSSL%';
+statement error
+SELECT * FROM ldbcgen(sf := 0);
 ----
-true
+Binder Error: ldbcgen parameter sf must be greater than zero
+
+statement error
+SELECT * FROM ldbcgen(sf := 1, format := 'json');
+----
+Binder Error: ldbcgen parameter format must be either 'parquet' or 'csv'
