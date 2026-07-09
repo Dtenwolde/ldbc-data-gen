@@ -62,4 +62,16 @@ string LdbcEmailBaseFromFirstName(const string &first_name) {
 	return collapsed;
 }
 
+int32_t LdbcJavaStringLength(const string &value) {
+	return icu::UnicodeString::fromUTF8(value).length();
+}
+
+string LdbcJavaSubstring(const string &value, int32_t offset, int32_t length) {
+	auto input = icu::UnicodeString::fromUTF8(value);
+	auto substring = input.tempSubString(offset, length);
+	string result;
+	substring.toUTF8String(result);
+	return result;
+}
+
 } // namespace duckdb

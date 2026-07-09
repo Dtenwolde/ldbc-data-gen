@@ -176,6 +176,23 @@ struct LdbcForumMembership {
 	int64_t person_id;
 };
 
+struct LdbcPost {
+	int64_t creation_date;
+	int64_t deletion_date;
+	bool explicitly_deleted;
+	int64_t id;
+	string image_file;
+	string location_ip;
+	string browser_used;
+	string language;
+	string content;
+	int32_t length;
+	int64_t creator_person_id;
+	int64_t forum_id;
+	int64_t location_country_id;
+	vector<int32_t> tags;
+};
+
 struct LdbcForum {
 	int64_t creation_date;
 	int64_t deletion_date;
@@ -184,8 +201,10 @@ struct LdbcForum {
 	string title;
 	int64_t moderator_person_id;
 	int32_t place_id;
+	int32_t language_id;
 	vector<int32_t> tags;
 	vector<LdbcForumMembership> memberships;
+	vector<LdbcPost> posts;
 };
 
 class LdbcFacebookDegreeDistribution {

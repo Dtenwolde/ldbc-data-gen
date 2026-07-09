@@ -1,5 +1,7 @@
 #include "ldbc_person_dictionaries.hpp"
 
+#include "ldbc_unicode.hpp"
+
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
@@ -725,6 +727,97 @@ const string &LdbcTagDictionary::GetName(int32_t tag_id) const {
 	return tag_names[tag_id];
 }
 
+LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const LdbcTagDictionary &tags) : tags(tags) {
+	auto file = OpenDictionaryPath(dictionary_dir, "tagText.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto separator = line.find("  ");
+		if (separator == string::npos) {
+			throw InvalidInputException("Malformed tagText.txt line: '%s'", line);
+		}
+		auto tag_id = NumericCast<idx_t>(std::stoi(line.substr(0, separator)));
+		auto content_start = separator + 2;
+		auto content_end = line.find("  ", content_start);
+		auto content = content_end == string::npos ? line.substr(content_start) : line.substr(content_start, content_end - content_start);
+		if (tag_id >= tag_text.size()) {
+			tag_text.resize(tag_id + 1);
+		}
+		tag_text[tag_id] = content;
+	}
+}
+
+int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size,
+                                                 LdbcJavaRandom &random_reduced_text, int32_t min_size,
+                                                 int32_t max_size, double reduced_text_ratio) const {
+	if (random_reduced_text.NextDouble() > reduced_text_ratio) {
+		return random_text_size.NextInt(max_size - min_size) + min_size;
+	}
+	return random_text_size.NextInt((max_size >> 1) - min_size) + min_size;
+}
+
+int32_t LdbcTagTextDictionary::GetRandomLargeTextSize(LdbcJavaRandom &random_text_size, int32_t min_size,
+                                                      int32_t max_size) const {
+	return random_text_size.NextInt(max_size - min_size) + min_size;
+}
+
+string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+                                           int32_t text_size) const {
+	if (tag_ids.empty()) {
+		return "";
+	}
+
+	string result;
+	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
+	while (LdbcJavaStringLength(result) < text_size) {
+		for (auto tag_id : tag_ids) {
+			if (LdbcJavaStringLength(result) >= text_size) {
+				break;
+			}
+			if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_text.size() || tag_text[tag_id].empty()) {
+				throw InternalException("LDBC tag text id out of range");
+			}
+			auto &content = tag_text[tag_id];
+			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - LdbcJavaStringLength(result));
+			auto tag_name = this->tags.GetName(tag_id);
+			std::replace(tag_name.begin(), tag_name.end(), '_', ' ');
+			string escaped_tag_name;
+			for (auto character : tag_name) {
+				if (character == '"') {
+					escaped_tag_name += "\\\"";
+				} else {
+					escaped_tag_name += character;
+				}
+			}
+			auto prefix = "About " + escaped_tag_name + ", ";
+			this_tag_text_size += LdbcJavaStringLength(prefix);
+			auto content_length = LdbcJavaStringLength(content);
+			if (this_tag_text_size >= content_length) {
+				result += content;
+			} else {
+				auto prefix_length = LdbcJavaStringLength(prefix);
+				auto starting_pos = random_text_size.NextInt(content_length - this_tag_text_size + prefix_length);
+				result += prefix;
+				result += LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
+			}
+		}
+	}
+
+	if (!result.empty() && result.back() != '.') {
+		result += ".";
+	}
+	if (LdbcJavaStringLength(result) < text_size - 1) {
+		result += " ";
+	}
+	if (LdbcJavaStringLength(result) > text_size) {
+		result = LdbcJavaSubstring(result, 0, text_size - 1);
+	}
+	return StringUtil::Replace(result, "|", " ");
+}
+
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {
 	auto file = OpenDictionaryPath(dictionary_dir, "tagMatrix.txt");
 	string line;
@@ -898,6 +991,7 @@ LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, doubl
       emails(LdbcResourcePath(resource_dir, "dictionaries")),
       person_deletes(LdbcResourcePath(resource_dir, "dictionaries")),
       tags(LdbcResourcePath(resource_dir, "dictionaries"), places.GetCountries().size(), tag_country_corr_prob),
+      tag_text(LdbcResourcePath(resource_dir, "dictionaries"), tags),
       tag_matrix(LdbcResourcePath(resource_dir, "dictionaries")),
       companies(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_company),
       universities(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_university,

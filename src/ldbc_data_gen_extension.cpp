@@ -714,6 +714,8 @@ struct PersonOwnedRowCounts {
 	idx_t forums = 0;
 	idx_t forum_members = 0;
 	idx_t forum_tags = 0;
+	idx_t posts = 0;
+	idx_t post_tags = 0;
 };
 
 static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
@@ -729,6 +731,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	auto forum_appender = MakeStaticAppender(context, bind_data, "Forum");
 	auto forum_member_appender = MakeStaticAppender(context, bind_data, "Forum_hasMember_Person");
 	auto forum_tag_appender = MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag");
+	auto post_appender = MakeStaticAppender(context, bind_data, "Post");
+	auto post_tag_appender = MakeStaticAppender(context, bind_data, "Post_hasTag_Tag");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
 	                                                 (1.0 - config.bulkload_portion));
@@ -829,6 +833,35 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			forum_member_appender->EndRow();
 			row_counts.forum_members++;
 		}
+
+		for (auto &post : forum.posts) {
+			if (post.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			post_appender->BeginRow();
+			post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
+			post_appender->Append<int64_t>(post.id);
+			post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
+			post_appender->Append(Value(post.location_ip));
+			post_appender->Append(Value(post.browser_used));
+			post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
+			post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
+			post_appender->Append<int32_t>(post.length);
+			post_appender->Append<int64_t>(post.creator_person_id);
+			post_appender->Append<int64_t>(post.forum_id);
+			post_appender->Append<int64_t>(post.location_country_id);
+			post_appender->EndRow();
+			row_counts.posts++;
+
+			for (auto tag_id : post.tags) {
+				post_tag_appender->BeginRow();
+				post_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
+				post_tag_appender->Append<int64_t>(post.id);
+				post_tag_appender->Append<int32_t>(tag_id);
+				post_tag_appender->EndRow();
+				row_counts.post_tags++;
+			}
+		}
 	}
 	person_appender->Close();
 	interest_appender->Close();
@@ -838,6 +871,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	forum_appender->Close();
 	forum_member_appender->Close();
 	forum_tag_appender->Close();
+	post_appender->Close();
+	post_tag_appender->Close();
 	return row_counts;
 }
 
@@ -857,6 +892,8 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	row_counts["Forum"] = person_counts.forums;
 	row_counts["Forum_hasMember_Person"] = person_counts.forum_members;
 	row_counts["Forum_hasTag_Tag"] = person_counts.forum_tags;
+	row_counts["Post"] = person_counts.posts;
+	row_counts["Post_hasTag_Tag"] = person_counts.post_tags;
 	return row_counts;
 }
 

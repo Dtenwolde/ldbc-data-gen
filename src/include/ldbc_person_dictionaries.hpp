@@ -134,6 +134,20 @@ private:
 	vector<vector<double>> cumulative_distribution_by_country;
 };
 
+class LdbcTagTextDictionary {
+public:
+	LdbcTagTextDictionary(const string &dictionary_dir, const LdbcTagDictionary &tags);
+
+	int32_t GetRandomTextSize(LdbcJavaRandom &random_text_size, LdbcJavaRandom &random_reduced_text, int32_t min_size,
+	                          int32_t max_size, double reduced_text_ratio) const;
+	int32_t GetRandomLargeTextSize(LdbcJavaRandom &random_text_size, int32_t min_size, int32_t max_size) const;
+	string GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids, int32_t text_size) const;
+
+private:
+	const LdbcTagDictionary &tags;
+	vector<string> tag_text;
+};
+
 class LdbcTagMatrix {
 public:
 	explicit LdbcTagMatrix(const string &dictionary_dir);
@@ -197,6 +211,7 @@ public:
 	LdbcEmailDictionary emails;
 	LdbcPersonDeleteDistribution person_deletes;
 	LdbcTagDictionary tags;
+	LdbcTagTextDictionary tag_text;
 	LdbcTagMatrix tag_matrix;
 	LdbcCompanyDictionary companies;
 	LdbcUniversityDictionary universities;
