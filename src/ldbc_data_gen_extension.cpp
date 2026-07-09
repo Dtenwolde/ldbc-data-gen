@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "ldbc_data_gen_extension.hpp"
+#include "ldbc_java_random.hpp"
 #include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/exception.hpp"
@@ -18,6 +19,7 @@
 #include "duckdb/planner/binder.hpp"
 
 #include <fstream>
+#include <limits>
 #include <set>
 #include <unordered_map>
 
@@ -174,6 +176,24 @@ struct LdbcGenSchemaGlobalState : public GlobalTableFunctionState {
 	idx_t offset = 0;
 };
 
+struct LdbcJavaRandomBindData : public TableFunctionData {
+	int64_t seed = 0;
+	idx_t rows = 1;
+};
+
+struct LdbcJavaRandomGlobalState : public GlobalTableFunctionState {
+	explicit LdbcJavaRandomGlobalState(int64_t seed)
+	    : next_long(seed), next_double(seed), next_float(seed), next_int_100(seed), next_int_max(seed) {
+	}
+
+	idx_t offset = 0;
+	LdbcJavaRandom next_long;
+	LdbcJavaRandom next_double;
+	LdbcJavaRandom next_float;
+	LdbcJavaRandom next_int_100;
+	LdbcJavaRandom next_int_max;
+};
+
 static string GetStringParameter(TableFunctionBindInput &input, const string &name, const string &default_value) {
 	auto entry = input.named_parameters.find(name);
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
@@ -196,6 +216,14 @@ static bool GetBooleanParameter(TableFunctionBindInput &input, const string &nam
 		return default_value;
 	}
 	return entry->second.GetValue<bool>();
+}
+
+static int64_t GetBigIntParameter(TableFunctionBindInput &input, const string &name, int64_t default_value) {
+	auto entry = input.named_parameters.find(name);
+	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
+		return default_value;
+	}
+	return entry->second.GetValue<int64_t>();
 }
 
 static LogicalType LdbcLogicalType(const string &type) {
@@ -872,6 +900,60 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 	output.SetCardinality(count);
 }
 
+static unique_ptr<FunctionData> LdbcJavaRandomBind(ClientContext &context, TableFunctionBindInput &input,
+                                                   vector<LogicalType> &return_types, vector<string> &names) {
+	if (!input.inputs.empty()) {
+		throw BinderException("ldbc_java_random only accepts named parameters");
+	}
+
+	auto result = make_uniq<LdbcJavaRandomBindData>();
+	result->seed = GetBigIntParameter(input, "seed", 0);
+	auto rows = GetBigIntParameter(input, "rows", 1);
+	if (rows < 0) {
+		throw BinderException("ldbc_java_random parameter rows must be non-negative");
+	}
+	result->rows = UnsafeNumericCast<idx_t>(rows);
+
+	names.emplace_back("draw_index");
+	return_types.emplace_back(LogicalType::INTEGER);
+	names.emplace_back("next_long");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("next_double");
+	return_types.emplace_back(LogicalType::DOUBLE);
+	names.emplace_back("next_float");
+	return_types.emplace_back(LogicalType::FLOAT);
+	names.emplace_back("next_int_100");
+	return_types.emplace_back(LogicalType::INTEGER);
+	names.emplace_back("next_int_max");
+	return_types.emplace_back(LogicalType::INTEGER);
+
+	return std::move(result);
+}
+
+static unique_ptr<GlobalTableFunctionState> LdbcJavaRandomInit(ClientContext &context, TableFunctionInitInput &input) {
+	auto &bind_data = input.bind_data->Cast<LdbcJavaRandomBindData>();
+	return make_uniq<LdbcJavaRandomGlobalState>(bind_data.seed);
+}
+
+static void LdbcJavaRandomFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->Cast<LdbcJavaRandomBindData>();
+	auto &state = data_p.global_state->Cast<LdbcJavaRandomGlobalState>();
+	idx_t count = 0;
+
+	while (state.offset < bind_data.rows && count < STANDARD_VECTOR_SIZE) {
+		output.data[0].SetValue(count, Value::INTEGER(NumericCast<int32_t>(state.offset)));
+		output.data[1].SetValue(count, Value::BIGINT(state.next_long.NextLong()));
+		output.data[2].SetValue(count, Value::DOUBLE(state.next_double.NextDouble()));
+		output.data[3].SetValue(count, Value::FLOAT(state.next_float.NextFloat()));
+		output.data[4].SetValue(count, Value::INTEGER(state.next_int_100.NextInt(100)));
+		output.data[5].SetValue(count, Value::INTEGER(state.next_int_max.NextInt(std::numeric_limits<int32_t>::max())));
+		state.offset++;
+		count++;
+	}
+
+	output.SetCardinality(count);
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen("ldbcgen", {}, LdbcGenFunction, LdbcGenBind, LdbcGenInit);
 	ldbcgen.named_parameters["sf"] = LogicalType::DOUBLE;
@@ -887,6 +969,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen_schema("ldbcgen_schema", {}, LdbcGenSchemaFunction, LdbcGenSchemaBind, LdbcGenSchemaInit);
 	ldbcgen_schema.named_parameters["format"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(ldbcgen_schema);
+
+	TableFunction java_random("ldbc_java_random", {}, LdbcJavaRandomFunction, LdbcJavaRandomBind, LdbcJavaRandomInit);
+	java_random.named_parameters["seed"] = LogicalType::BIGINT;
+	java_random.named_parameters["rows"] = LogicalType::BIGINT;
+	loader.RegisterFunction(java_random);
 }
 
 void LdbcDataGenExtension::Load(ExtensionLoader &loader) {

@@ -11,6 +11,84 @@ Catalog Error: Table Function with name ldbcgen does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
+# Java-compatible RNG vectors used by the Spark generator parity path.
+query I
+SELECT next_long
+FROM ldbc_java_random(seed := 0, rows := 5)
+ORDER BY draw_index;
+----
+-4962768465676381896
+4437113781045784766
+-6688467811848818630
+-8292973307042192125
+-7423979211207825555
+
+query T
+SELECT printf('%.17g', next_double)
+FROM ldbc_java_random(seed := 0, rows := 5)
+ORDER BY draw_index;
+----
+0.73096778737665702
+0.24053641567148587
+0.63741742535010826
+0.55043700511763394
+0.59754527779720179
+
+query T
+SELECT printf('%.9g', next_float)
+FROM ldbc_java_random(seed := 0, rows := 5)
+ORDER BY draw_index;
+----
+0.73096776
+0.831440985
+0.240536392
+0.606345177
+0.637417376
+
+query I
+SELECT next_int_100
+FROM ldbc_java_random(seed := 0, rows := 10)
+ORDER BY draw_index;
+----
+60
+48
+29
+47
+15
+53
+91
+61
+19
+54
+
+query I
+SELECT next_int_max
+FROM ldbc_java_random(seed := 0, rows := 5)
+ORDER BY draw_index;
+----
+1569741360
+1785505948
+516548029
+1302116447
+1368843515
+
+query I
+SELECT next_long
+FROM ldbc_java_random(seed := 53223436, rows := 5)
+ORDER BY draw_index;
+----
+-4512997451346958241
+-6473059946999388453
+-1813421515445810181
+-4477688948489879377
+-3180555934360176434
+
+statement error
+SELECT *
+FROM ldbc_java_random(rows := -1);
+----
+Binder Error: ldbc_java_random parameter rows must be non-negative
+
 # Confirm table generation returns static dictionary row counts.
 query TI
 SELECT relation_name, row_count
