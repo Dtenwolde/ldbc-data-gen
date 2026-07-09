@@ -24,6 +24,7 @@
 #include "duckdb/catalog/catalog_search_path.hpp"
 #include "duckdb/planner/binder.hpp"
 
+#include <atomic>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -75,16 +76,16 @@ static constexpr LdbcSchemaColumn LDBC_BI_STATIC_SCHEMA[] = {
     {"Person", "dynamic/Person", "dynamic_node", "id", "email", "VARCHAR", false},
     {"Person_hasInterest_Tag", "dynamic/Person_hasInterest_Tag", "dynamic_edge", "PersonId,TagId", "creationDate",
      "TIMESTAMP_MS", false},
-    {"Person_hasInterest_Tag", "dynamic/Person_hasInterest_Tag", "dynamic_edge", "PersonId,TagId", "PersonId",
-     "BIGINT", false},
-    {"Person_hasInterest_Tag", "dynamic/Person_hasInterest_Tag", "dynamic_edge", "PersonId,TagId", "TagId",
-     "INTEGER", false},
+    {"Person_hasInterest_Tag", "dynamic/Person_hasInterest_Tag", "dynamic_edge", "PersonId,TagId", "PersonId", "BIGINT",
+     false},
+    {"Person_hasInterest_Tag", "dynamic/Person_hasInterest_Tag", "dynamic_edge", "PersonId,TagId", "TagId", "INTEGER",
+     false},
     {"Person_knows_Person", "dynamic/Person_knows_Person", "dynamic_edge", "Person1Id,Person2Id", "creationDate",
      "TIMESTAMP_MS", false},
-    {"Person_knows_Person", "dynamic/Person_knows_Person", "dynamic_edge", "Person1Id,Person2Id", "Person1Id",
-     "BIGINT", false},
-    {"Person_knows_Person", "dynamic/Person_knows_Person", "dynamic_edge", "Person1Id,Person2Id", "Person2Id",
-     "BIGINT", false},
+    {"Person_knows_Person", "dynamic/Person_knows_Person", "dynamic_edge", "Person1Id,Person2Id", "Person1Id", "BIGINT",
+     false},
+    {"Person_knows_Person", "dynamic/Person_knows_Person", "dynamic_edge", "Person1Id,Person2Id", "Person2Id", "BIGINT",
+     false},
     {"Person_studyAt_University", "dynamic/Person_studyAt_University", "dynamic_edge", "PersonId,UniversityId",
      "creationDate", "TIMESTAMP_MS", false},
     {"Person_studyAt_University", "dynamic/Person_studyAt_University", "dynamic_edge", "PersonId,UniversityId",
@@ -129,8 +130,7 @@ static constexpr LdbcSchemaColumn LDBC_BI_STATIC_SCHEMA[] = {
      "TIMESTAMP_MS", false},
     {"Comment_hasTag_Tag", "dynamic/Comment_hasTag_Tag", "dynamic_edge", "CommentId,TagId", "CommentId", "BIGINT",
      false},
-    {"Comment_hasTag_Tag", "dynamic/Comment_hasTag_Tag", "dynamic_edge", "CommentId,TagId", "TagId", "INTEGER",
-     false},
+    {"Comment_hasTag_Tag", "dynamic/Comment_hasTag_Tag", "dynamic_edge", "CommentId,TagId", "TagId", "INTEGER", false},
     {"Post", "dynamic/Post", "dynamic_node", "id", "creationDate", "TIMESTAMP_MS", false},
     {"Post", "dynamic/Post", "dynamic_node", "id", "id", "BIGINT", false},
     {"Post", "dynamic/Post", "dynamic_node", "id", "imageFile", "VARCHAR", true},
@@ -148,13 +148,12 @@ static constexpr LdbcSchemaColumn LDBC_BI_STATIC_SCHEMA[] = {
     {"Post_hasTag_Tag", "dynamic/Post_hasTag_Tag", "dynamic_edge", "PostId,TagId", "TagId", "INTEGER", false},
     {"Person_likes_Post", "dynamic/Person_likes_Post", "dynamic_edge", "PersonId,PostId", "creationDate",
      "TIMESTAMP_MS", false},
-    {"Person_likes_Post", "dynamic/Person_likes_Post", "dynamic_edge", "PersonId,PostId", "PersonId", "BIGINT",
-     false},
+    {"Person_likes_Post", "dynamic/Person_likes_Post", "dynamic_edge", "PersonId,PostId", "PersonId", "BIGINT", false},
     {"Person_likes_Post", "dynamic/Person_likes_Post", "dynamic_edge", "PersonId,PostId", "PostId", "BIGINT", false},
     {"Person_likes_Comment", "dynamic/Person_likes_Comment", "dynamic_edge", "PersonId,CommentId", "creationDate",
      "TIMESTAMP_MS", false},
-    {"Person_likes_Comment", "dynamic/Person_likes_Comment", "dynamic_edge", "PersonId,CommentId", "PersonId",
-     "BIGINT", false},
+    {"Person_likes_Comment", "dynamic/Person_likes_Comment", "dynamic_edge", "PersonId,CommentId", "PersonId", "BIGINT",
+     false},
     {"Person_likes_Comment", "dynamic/Person_likes_Comment", "dynamic_edge", "PersonId,CommentId", "CommentId",
      "BIGINT", false},
 };
@@ -168,13 +167,34 @@ struct LdbcGenBindData : public TableFunctionData {
 	string format = "parquet";
 	string dictionary_dir = "third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries";
 	bool overwrite = false;
+	bool primary_keys = false;
 };
 
 struct LdbcGenGlobalState : public GlobalTableFunctionState {
 	bool materialized = false;
 	idx_t offset = 0;
+	std::atomic<double> progress {0.0};
 	unordered_map<string, idx_t> row_counts;
 };
+
+static void SetLdbcGenProgress(LdbcGenGlobalState *state, double progress) {
+	if (!state) {
+		return;
+	}
+	if (progress < 0.0) {
+		progress = 0.0;
+	} else if (progress > 100.0) {
+		progress = 100.0;
+	}
+	state->progress.store(progress);
+}
+
+static double LdbcGenProgressRange(double start, double end, idx_t done, idx_t total) {
+	if (total == 0) {
+		return end;
+	}
+	return start + ((end - start) * (static_cast<double>(done) / static_cast<double>(total)));
+}
 
 struct LdbcGenSchemaBindData : public TableFunctionData {
 	string format = "parquet";
@@ -320,14 +340,14 @@ static void DropTableIfNeeded(ClientContext &context, const string &catalog_name
 }
 
 static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begin, const LdbcSchemaColumn *end,
-                            const string &catalog_name, const string &schema, bool overwrite) {
+                            const string &catalog_name, const string &schema, bool overwrite, bool primary_keys) {
 	auto table_name = string(begin->relation_name);
 	if (overwrite) {
 		DropTableIfNeeded(context, catalog_name, schema, table_name);
 	}
 
-	auto table_info = make_uniq<CreateTableInfo>(
-	    QualifiedName(Identifier(catalog_name), Identifier(schema), Identifier(table_name)));
+	auto table_info =
+	    make_uniq<CreateTableInfo>(QualifiedName(Identifier(catalog_name), Identifier(schema), Identifier(table_name)));
 	idx_t column_index = 0;
 	for (auto column = begin; column != end; column++) {
 		table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
@@ -336,7 +356,9 @@ static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begi
 		}
 		column_index++;
 	}
-	table_info->constraints.push_back(make_uniq<UniqueConstraint>(SplitPrimaryKey(begin->primary_key), true));
+	if (primary_keys) {
+		table_info->constraints.push_back(make_uniq<UniqueConstraint>(SplitPrimaryKey(begin->primary_key), true));
+	}
 	Catalog::GetCatalog(context, Identifier(catalog_name)).CreateTable(context, std::move(table_info));
 }
 
@@ -630,7 +652,7 @@ static idx_t AppendTagClasses(ClientContext &context, const LdbcGenBindData &bin
 		appender->Append<int32_t>(class_id);
 		appender->Append(Value(name));
 		appender->Append(Value(name == "Thing" ? string("http://www.w3.org/2002/07/owl#Thing")
-		                                      : "http://dbpedia.org/ontology/" + name));
+		                                       : "http://dbpedia.org/ontology/" + name));
 		auto parent = data.tag_class_parent.find(class_id);
 		if (parent == data.tag_class_parent.end()) {
 			appender->Append(Value());
@@ -720,11 +742,13 @@ struct PersonOwnedRowCounts {
 	idx_t comment_likes = 0;
 };
 
-static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                    LdbcGenGlobalState *progress_state) {
 	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
 	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
 	LdbcDateGenerator dates(config);
 	auto persons = LdbcGeneratePersons(config);
+	SetLdbcGenProgress(progress_state, 25.0);
 	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
 	auto interest_appender = MakeStaticAppender(context, bind_data, "Person_hasInterest_Tag");
 	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
@@ -740,11 +764,13 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	auto post_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Post");
 	auto comment_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Comment");
 	auto bulkload_threshold =
-	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
-	                                                 (1.0 - config.bulkload_portion));
+	    dates.SimulationEnd() -
+	    static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
+	                         (1.0 - config.bulkload_portion));
 
 	PersonOwnedRowCounts row_counts;
-	for (auto &person : persons) {
+	for (idx_t person_idx = 0; person_idx < persons.size(); person_idx++) {
+		auto &person = persons[person_idx];
 		if (person.creation_date >= bulkload_threshold) {
 			continue;
 		}
@@ -792,10 +818,16 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			work_appender->EndRow();
 			row_counts.work_at++;
 		}
+		if ((person_idx & 1023) == 0) {
+			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(25.0, 45.0, person_idx + 1, persons.size()));
+		}
 	}
+	SetLdbcGenProgress(progress_state, 45.0);
 
 	auto knows_edges = LdbcGenerateKnows(config, persons);
-	for (auto &edge : knows_edges) {
+	SetLdbcGenProgress(progress_state, 55.0);
+	for (idx_t edge_idx = 0; edge_idx < knows_edges.size(); edge_idx++) {
+		auto &edge = knows_edges[edge_idx];
 		if (edge.creation_date >= bulkload_threshold) {
 			continue;
 		}
@@ -805,10 +837,16 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 		knows_appender->Append<int64_t>(edge.person2_id);
 		knows_appender->EndRow();
 		row_counts.knows++;
+		if ((edge_idx & 4095) == 0) {
+			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(55.0, 65.0, edge_idx + 1, knows_edges.size()));
+		}
 	}
+	SetLdbcGenProgress(progress_state, 65.0);
 
 	auto forums = LdbcGenerateForums(config, persons, knows_edges);
-	for (auto &forum : forums) {
+	SetLdbcGenProgress(progress_state, 75.0);
+	for (idx_t forum_idx = 0; forum_idx < forums.size(); forum_idx++) {
+		auto &forum = forums[forum_idx];
 		if (forum.creation_date < bulkload_threshold) {
 			forum_appender->BeginRow();
 			forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
@@ -882,7 +920,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			comment_appender->Append<int32_t>(comment.length);
 			comment_appender->Append<int64_t>(comment.creator_person_id);
 			comment_appender->Append<int64_t>(comment.location_country_id);
-			comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT) : Value::BIGINT(comment.parent_post_id));
+			comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
+			                                                      : Value::BIGINT(comment.parent_post_id));
 			comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
 			                                                         : Value::BIGINT(comment.parent_comment_id));
 			comment_appender->EndRow();
@@ -921,7 +960,11 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			comment_like_appender->EndRow();
 			row_counts.comment_likes++;
 		}
+		if ((forum_idx & 255) == 0) {
+			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(75.0, 95.0, forum_idx + 1, forums.size()));
+		}
 	}
+	SetLdbcGenProgress(progress_state, 95.0);
 	person_appender->Close();
 	interest_appender->Close();
 	study_appender->Close();
@@ -939,14 +982,20 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	return row_counts;
 }
 
-static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                         LdbcGenGlobalState *progress_state = nullptr) {
 	auto data = LoadStaticDictionaryData(bind_data);
+	SetLdbcGenProgress(progress_state, 4.0);
 	unordered_map<string, idx_t> row_counts;
 	row_counts["Place"] = AppendPlaces(context, bind_data, data);
+	SetLdbcGenProgress(progress_state, 8.0);
 	row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
+	SetLdbcGenProgress(progress_state, 12.0);
 	row_counts["Tag"] = AppendTags(context, bind_data, data);
+	SetLdbcGenProgress(progress_state, 16.0);
 	row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
-	auto person_counts = AppendPersonOwnedTables(context, bind_data);
+	SetLdbcGenProgress(progress_state, 20.0);
+	auto person_counts = AppendPersonOwnedTables(context, bind_data, progress_state);
 	row_counts["Person"] = person_counts.persons;
 	row_counts["Person_hasInterest_Tag"] = person_counts.interests;
 	row_counts["Person_knows_Person"] = person_counts.knows;
@@ -998,10 +1047,10 @@ static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context
 
 	idx_t relation_start = 0;
 	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
-		if (row_idx == LdbcSchemaSize() ||
-		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+		if (row_idx == LdbcSchemaSize() || string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) !=
+		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
 			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx,
-			                bind_data.catalog, bind_data.schema, bind_data.overwrite);
+			                bind_data.catalog, bind_data.schema, bind_data.overwrite, bind_data.primary_keys);
 			relation_start = row_idx;
 		}
 	}
@@ -1010,15 +1059,16 @@ static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context
 
 namespace ldbc {
 
-void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite) {
+void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite,
+                                      bool primary_keys) {
 	CreateSchemaIfNeeded(context, catalog, schema);
 
 	idx_t relation_start = 0;
 	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
-		if (row_idx == LdbcSchemaSize() ||
-		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+		if (row_idx == LdbcSchemaSize() || string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) !=
+		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
 			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx, catalog,
-			                schema, overwrite);
+			                schema, overwrite, primary_keys);
 			relation_start = row_idx;
 		}
 	}
@@ -1061,6 +1111,7 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	result->format = StringUtil::Lower(GetStringParameter(input, "format", "parquet"));
 	result->dictionary_dir = GetStringParameter(input, "dictionary_dir", result->dictionary_dir);
 	result->overwrite = GetBooleanParameter(input, "overwrite", false);
+	result->primary_keys = GetBooleanParameter(input, "primary_keys", false);
 
 	if (result->scale_factor <= 0) {
 		throw BinderException("ldbcgen parameter sf must be greater than zero");
@@ -1106,19 +1157,31 @@ static unique_ptr<GlobalTableFunctionState> LdbcGenInit(ClientContext &context, 
 	return make_uniq<LdbcGenGlobalState>();
 }
 
+static double LdbcGenProgress(ClientContext &context, const FunctionData *bind_data,
+                              const GlobalTableFunctionState *global_state) {
+	if (!global_state) {
+		return 0.0;
+	}
+	auto &state = global_state->Cast<LdbcGenGlobalState>();
+	return state.progress.load();
+}
+
 static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
 	auto &bind_data = data_p.bind_data->Cast<LdbcGenBindData>();
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
 
 	if (bind_data.target == "tables" && !state.materialized) {
-		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite);
-		state.row_counts =
-		    ldbc::LDBCGenWrapper::LoadLDBCData(context, bind_data.catalog, bind_data.schema, bind_data.dictionary_dir,
-		                                       bind_data.scale_factor);
+		SetLdbcGenProgress(&state, 1.0);
+		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite,
+		                                       bind_data.primary_keys);
+		SetLdbcGenProgress(&state, 2.0);
+		state.row_counts = PopulateStaticTables(context, bind_data, &state);
+		SetLdbcGenProgress(&state, 98.0);
 		state.materialized = true;
 	}
 
 	if (state.offset >= (bind_data.target == "tables" ? ldbc::LDBCGenWrapper::RelationCount() : 1)) {
+		SetLdbcGenProgress(&state, 100.0);
 		return;
 	}
 
@@ -1132,6 +1195,7 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		output.data[5].SetValue(0, "planned");
 		count = 1;
 		state.offset = 1;
+		SetLdbcGenProgress(&state, 100.0);
 	} else {
 		while (state.offset < ldbc::LDBCGenWrapper::RelationCount() && count < STANDARD_VECTOR_SIZE) {
 			auto relation_name = ldbc::LDBCGenWrapper::RelationName(state.offset);
@@ -1145,6 +1209,8 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			count++;
 			state.offset++;
 		}
+		SetLdbcGenProgress(&state,
+		                   LdbcGenProgressRange(98.0, 100.0, state.offset, ldbc::LDBCGenWrapper::RelationCount()));
 	}
 	output.SetCardinality(count);
 }
@@ -1204,8 +1270,8 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 		}
 	}
 
-	for (idx_t row_idx = state.offset; row_idx < sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]) &&
-	                                   count < STANDARD_VECTOR_SIZE;
+	for (idx_t row_idx = state.offset;
+	     row_idx < sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]) && count < STANDARD_VECTOR_SIZE;
 	     row_idx++) {
 		auto &row = LDBC_BI_STATIC_SCHEMA[row_idx];
 		if (!previous_relation || string(previous_relation) != row.relation_name) {
@@ -1215,8 +1281,8 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 			column_index++;
 		}
 
-		string snapshot_path = "graphs/" + bind_data.format + "/bi/composite-merged-fk/initial_snapshot/" +
-		                       string(row.entity_path);
+		string snapshot_path =
+		    "graphs/" + bind_data.format + "/bi/composite-merged-fk/initial_snapshot/" + string(row.entity_path);
 		output.data[0].SetValue(count, row.relation_name);
 		output.data[1].SetValue(count, row.entity_path);
 		output.data[2].SetValue(count, row.kind);
@@ -1268,38 +1334,40 @@ static vector<LdbcGenConfigEntry> BuildConfigEntries(const LdbcDatagenConfig &co
 	               "params_default.ini:generator.maxEmails");
 	AddConfigEntry(entries, "prob_second_lang", DoubleToConfigString(config.prob_second_lang), "DOUBLE",
 	               "params_default.ini:generator.maxEmails");
-	AddConfigEntry(entries, "missing_ratio", DoubleToConfigString(config.missing_ratio), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "missing_ratio", DoubleToConfigString(config.missing_ratio), "DOUBLE",
+	               "params_default.ini");
 	AddConfigEntry(entries, "prob_another_browser", DoubleToConfigString(config.prob_another_browser), "DOUBLE",
 	               "params_default.ini");
-	AddConfigEntry(entries, "prob_uncorrelated_company", DoubleToConfigString(config.prob_uncorrelated_company), "DOUBLE",
-	               "params_default.ini");
-	AddConfigEntry(entries, "prob_uncorrelated_organisation", DoubleToConfigString(config.prob_uncorrelated_organisation),
+	AddConfigEntry(entries, "prob_uncorrelated_company", DoubleToConfigString(config.prob_uncorrelated_company),
 	               "DOUBLE", "params_default.ini");
-	AddConfigEntry(entries, "prob_top_univ", DoubleToConfigString(config.prob_top_univ), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_uncorrelated_organisation",
+	               DoubleToConfigString(config.prob_uncorrelated_organisation), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_top_univ", DoubleToConfigString(config.prob_top_univ), "DOUBLE",
+	               "params_default.ini");
 	AddConfigEntry(entries, "tag_country_corr_prob", DoubleToConfigString(config.tag_country_corr_prob), "DOUBLE",
 	               "params_default.ini");
 	AddConfigEntry(entries, "max_num_post_per_month", std::to_string(config.max_num_post_per_month), "INTEGER",
 	               "params_default.ini");
 	AddConfigEntry(entries, "max_num_comments", std::to_string(config.max_num_comments), "INTEGER",
 	               "params_default.ini");
-	AddConfigEntry(entries, "max_num_flashmob_post_per_month",
-	               std::to_string(config.max_num_flashmob_post_per_month), "INTEGER", "params_default.ini");
-	AddConfigEntry(entries, "max_num_group_created_per_person",
-	               std::to_string(config.max_num_group_created_per_person), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_flashmob_post_per_month", std::to_string(config.max_num_flashmob_post_per_month),
+	               "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_group_created_per_person", std::to_string(config.max_num_group_created_per_person),
+	               "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "max_num_group_flashmob_post_per_month",
 	               std::to_string(config.max_num_group_flashmob_post_per_month), "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "max_num_group_post_per_month", std::to_string(config.max_num_group_post_per_month),
 	               "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "max_num_like", std::to_string(config.max_num_like), "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "max_group_size", std::to_string(config.max_group_size), "INTEGER", "params_default.ini");
-	AddConfigEntry(entries, "max_num_photo_albums_per_month",
-	               std::to_string(config.max_num_photo_albums_per_month), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_photo_albums_per_month", std::to_string(config.max_num_photo_albums_per_month),
+	               "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "max_num_photo_per_albums", std::to_string(config.max_num_photo_per_albums), "INTEGER",
 	               "params_default.ini");
 	AddConfigEntry(entries, "max_num_popular_places", std::to_string(config.max_num_popular_places), "INTEGER",
 	               "params_default.ini");
-	AddConfigEntry(entries, "max_num_tag_per_flashmob_post",
-	               std::to_string(config.max_num_tag_per_flashmob_post), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_tag_per_flashmob_post", std::to_string(config.max_num_tag_per_flashmob_post),
+	               "INTEGER", "params_default.ini");
 	AddConfigEntry(entries, "flashmob_tags_per_month", std::to_string(config.flashmob_tags_per_month), "INTEGER",
 	               "params_default.ini");
 	AddConfigEntry(entries, "min_text_size", std::to_string(config.min_text_size), "INTEGER", "params_default.ini");
@@ -1476,7 +1544,8 @@ static unique_ptr<FunctionData> LdbcGenPersonCoreBind(ClientContext &context, Ta
 	return std::move(result);
 }
 
-static unique_ptr<GlobalTableFunctionState> LdbcGenPersonCoreInit(ClientContext &context, TableFunctionInitInput &input) {
+static unique_ptr<GlobalTableFunctionState> LdbcGenPersonCoreInit(ClientContext &context,
+                                                                  TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->Cast<LdbcGenPersonCoreBindData>();
 	return make_uniq<LdbcGenPersonCoreGlobalState>(bind_data.config);
 }
@@ -1589,6 +1658,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	ldbcgen.named_parameters["format"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["dictionary_dir"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["overwrite"] = LogicalType::BOOLEAN;
+	ldbcgen.named_parameters["primary_keys"] = LogicalType::BOOLEAN;
+	ldbcgen.table_scan_progress = LdbcGenProgress;
 	loader.RegisterFunction(ldbcgen);
 
 	TableFunction ldbcgen_schema("ldbcgen_schema", {}, LdbcGenSchemaFunction, LdbcGenSchemaBind, LdbcGenSchemaInit);
