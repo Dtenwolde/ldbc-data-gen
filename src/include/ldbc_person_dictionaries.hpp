@@ -30,13 +30,19 @@ public:
 	const vector<int32_t> &GetCountries() const;
 	const string &GetCountryName(int32_t country_id) const;
 	int32_t GetCountryId(const string &country_name) const;
+	int32_t GetCityId(const string &city_name) const;
+	int32_t GetZOrderId(int32_t place_id) const;
+	int32_t GetPlaceIdFromZOrder(int32_t zorder_id) const;
 
 private:
 	vector<float> cumulative_distribution;
 	vector<int32_t> countries;
 	vector<string> country_names_by_id;
 	unordered_map<string, int32_t> country_names;
+	unordered_map<string, int32_t> city_names;
 	unordered_map<int32_t, vector<int32_t>> cities_by_country;
+	vector<int32_t> country_zorder_by_id;
+	vector<int32_t> place_id_by_zorder;
 };
 
 class LdbcIPAddressDictionary {
@@ -100,9 +106,72 @@ private:
 	vector<double> cumulative_distribution;
 };
 
+class LdbcTagDictionary {
+public:
+	LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob);
+
+	int32_t GetTagByCountry(LdbcJavaRandom &random_tag_other_country, LdbcJavaRandom &random_tag_country_prob,
+	                        int32_t country_id) const;
+
+private:
+	double tag_country_corr_prob;
+	vector<vector<int32_t>> tags_by_country;
+	vector<vector<double>> cumulative_distribution_by_country;
+};
+
+class LdbcTagMatrix {
+public:
+	explicit LdbcTagMatrix(const string &dictionary_dir);
+
+	vector<int32_t> GetSetOfTags(LdbcJavaRandom &random_topic, LdbcJavaRandom &random_tag, int32_t popular_tag_id,
+	                             int32_t tag_count) const;
+
+private:
+	unordered_map<int32_t, vector<int32_t>> related_tags;
+	unordered_map<int32_t, vector<double>> cumulative_distribution;
+	vector<int32_t> non_zero_tags;
+};
+
+class LdbcCompanyDictionary {
+public:
+	LdbcCompanyDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,
+	                      double prob_uncorrelated_company);
+
+	int64_t GetRandomCompany(LdbcJavaRandom &random_uncorrelated_company, LdbcJavaRandom &random_uncorrelated_location,
+	                         LdbcJavaRandom &random_company, int32_t country_id) const;
+	idx_t GetCompanyCount() const;
+
+private:
+	const LdbcPlaceDictionary &places;
+	double prob_uncorrelated_company;
+	vector<vector<int64_t>> companies_by_country;
+	idx_t company_count = 0;
+};
+
+class LdbcUniversityDictionary {
+public:
+	LdbcUniversityDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,
+	                         double prob_uncorrelated_university, double prob_top_university, int64_t start_index);
+
+	int32_t GetRandomUniversityLocation(LdbcJavaRandom &random_uncorrelated_university,
+	                                    LdbcJavaRandom &random_uncorrelated_location,
+	                                    LdbcJavaRandom &random_top_university, LdbcJavaRandom &random_university,
+	                                    int32_t country_id) const;
+	int64_t GetUniversityFromLocation(int32_t university_location) const;
+
+private:
+	const LdbcPlaceDictionary &places;
+	double prob_uncorrelated_university;
+	double prob_top_university;
+	int64_t start_index;
+	vector<vector<int64_t>> universities_by_country;
+};
+
 class LdbcPersonDictionaries {
 public:
-	LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang);
+	LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang,
+	                       double tag_country_corr_prob, double prob_uncorrelated_company,
+	                       double prob_uncorrelated_university, double prob_top_university);
 
 	LdbcBrowserDictionary browsers;
 	LdbcPlaceDictionary places;
@@ -110,6 +179,10 @@ public:
 	LdbcLanguageDictionary languages;
 	LdbcNamesDictionary names;
 	LdbcEmailDictionary emails;
+	LdbcTagDictionary tags;
+	LdbcTagMatrix tag_matrix;
+	LdbcCompanyDictionary companies;
+	LdbcUniversityDictionary universities;
 };
 
 string LdbcResourcePath(const string &base, const string &path);

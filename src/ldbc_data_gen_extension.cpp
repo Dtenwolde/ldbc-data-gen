@@ -705,39 +705,82 @@ static idx_t AppendOrganisations(ClientContext &context, const LdbcGenBindData &
 	return row_count;
 }
 
-static idx_t AppendPersons(ClientContext &context, const LdbcGenBindData &bind_data) {
+struct PersonOwnedRowCounts {
+	idx_t persons = 0;
+	idx_t interests = 0;
+	idx_t study_at = 0;
+	idx_t work_at = 0;
+};
+
+static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
 	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
 	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
 	LdbcDateGenerator dates(config);
 	LdbcPersonGenerator generator(config);
-	auto appender = MakeStaticAppender(context, bind_data, "Person");
+	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
+	auto interest_appender = MakeStaticAppender(context, bind_data, "Person_hasInterest_Tag");
+	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
+	auto work_appender = MakeStaticAppender(context, bind_data, "Person_workAt_Company");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
 	                                                 (1.0 - config.bulkload_portion));
 
-	idx_t row_count = 0;
+	PersonOwnedRowCounts row_counts;
 	for (int64_t sequential_id = 0; sequential_id < config.num_persons; sequential_id++) {
 		auto person = generator.GenerateCore(sequential_id);
 		if (person.creation_date >= bulkload_threshold) {
 			continue;
 		}
-		appender->BeginRow();
-		appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-		appender->Append<int64_t>(person.account_id);
-		appender->Append(Value(person.first_name));
-		appender->Append(Value(person.last_name));
-		appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
-		appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
-		appender->Append(Value(person.ip_address));
-		appender->Append(Value(person.browser_name));
-		appender->Append<int32_t>(person.city_id);
-		appender->Append(Value(person.languages));
-		appender->Append(Value(person.emails));
-		appender->EndRow();
-		row_count++;
+
+		person_appender->BeginRow();
+		person_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+		person_appender->Append<int64_t>(person.account_id);
+		person_appender->Append(Value(person.first_name));
+		person_appender->Append(Value(person.last_name));
+		person_appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
+		person_appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
+		person_appender->Append(Value(person.ip_address));
+		person_appender->Append(Value(person.browser_name));
+		person_appender->Append<int32_t>(person.city_id);
+		person_appender->Append(Value(person.languages));
+		person_appender->Append(Value(person.emails));
+		person_appender->EndRow();
+		row_counts.persons++;
+
+		for (auto tag_id : person.interests) {
+			interest_appender->BeginRow();
+			interest_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+			interest_appender->Append<int64_t>(person.account_id);
+			interest_appender->Append<int32_t>(tag_id);
+			interest_appender->EndRow();
+			row_counts.interests++;
+		}
+
+		if (person.university_id != -1 && person.class_year != -1) {
+			study_appender->BeginRow();
+			study_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+			study_appender->Append<int64_t>(person.account_id);
+			study_appender->Append<int64_t>(person.university_id);
+			study_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(person.class_year)));
+			study_appender->EndRow();
+			row_counts.study_at++;
+		}
+
+		for (auto &company : person.companies) {
+			work_appender->BeginRow();
+			work_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+			work_appender->Append<int64_t>(person.account_id);
+			work_appender->Append<int64_t>(company.first);
+			work_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(company.second)));
+			work_appender->EndRow();
+			row_counts.work_at++;
+		}
 	}
-	appender->Close();
-	return row_count;
+	person_appender->Close();
+	interest_appender->Close();
+	study_appender->Close();
+	work_appender->Close();
+	return row_counts;
 }
 
 static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data) {
@@ -747,7 +790,11 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
 	row_counts["Tag"] = AppendTags(context, bind_data, data);
 	row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
-	row_counts["Person"] = AppendPersons(context, bind_data);
+	auto person_counts = AppendPersonOwnedTables(context, bind_data);
+	row_counts["Person"] = person_counts.persons;
+	row_counts["Person_hasInterest_Tag"] = person_counts.interests;
+	row_counts["Person_studyAt_University"] = person_counts.study_at;
+	row_counts["Person_workAt_Company"] = person_counts.work_at;
 	return row_counts;
 }
 

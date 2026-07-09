@@ -157,10 +157,10 @@ FROM ldbcgen_person_core(sf := 0.003, rows := 5)
 ORDER BY sequential_id;
 ----
 0	0	0	1311716494142	19791209299968	478051200000	1	87
-1	0	1	1324386401774	24189255811073	536803200000	1	30
-2	0	2	1313169520264	19791209299970	626745600000	0	49
-3	0	3	1262322619506	3	366076800000	1	58
-4	0	4	1342151307995	32985348833284	486518400000	1	16
+1	0	1	1289663409443	10995116277761	536803200000	1	30
+2	0	2	1349128911812	35184372088834	626745600000	0	49
+3	0	3	1341276916938	30786325577731	366076800000	1	58
+4	0	4	1333102272788	28587302322180	486518400000	1	16
 
 query IIIII
 SELECT sequential_id, block_id, block_offset, creation_date_ms, id
@@ -168,9 +168,9 @@ FROM ldbcgen_person_core(sf := 1, rows := 10005)
 WHERE sequential_id IN (9999, 10000, 10001)
 ORDER BY sequential_id;
 ----
-9999	0	9999	1315762472659	21990232565519
+9999	0	9999	1265663601555	9999
 10000	1	0	1281244244465	6597069776656
-10001	1	1	1309251967219	17592186054417
+10001	1	1	1329556423042	26388279076625
 
 query IIIITTTTT
 SELECT sequential_id, country_id, city_id, browser_id, browser, ip_address, language, first_name, last_name
@@ -189,10 +189,10 @@ FROM ldbcgen_person_core(sf := 0.003, rows := 5)
 ORDER BY sequential_id;
 ----
 0	John	John19791209299968@gmail.com;John19791209299968@gmx.com;John19791209299968@hotmail.com;John19791209299968@yahoo.com
-1	Kostas	Kostas24189255811073@gmail.com
-2	Aryo	Aryo19791209299970@zoho.com;Aryo19791209299970@gmx.com;Aryo19791209299970@yahoo.com;Aryo19791209299970@gmail.com
-3	Dmitry	Dmitry3@gmx.com
-4	John	John32985348833284@yahoo.com;John32985348833284@gmx.com;John32985348833284@gmail.com;John32985348833284@hotmail.com;John32985348833284@zoho.com
+1	Kostas	Kostas10995116277761@gmail.com;Kostas10995116277761@zoho.com;Kostas10995116277761@gmx.com;Kostas10995116277761@yahoo.com
+2	Aryo	Aryo35184372088834@gmx.com;Aryo35184372088834@yahoo.com;Aryo35184372088834@gmail.com;Aryo35184372088834@hotmail.com
+3	Dmitry	Dmitry30786325577731@gmail.com;Dmitry30786325577731@gmx.com;Dmitry30786325577731@zoho.com
+4	John	John28587302322180@gmx.com;John28587302322180@gmail.com;John28587302322180@hotmail.com
 
 statement error
 SELECT *
@@ -204,11 +204,15 @@ Binder Error: ldbcgen_person_core parameter rows must be non-negative
 query TI
 SELECT relation_name, row_count
 FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
-WHERE relation_name IN ('Organisation', 'Person', 'Place', 'Tag', 'TagClass')
+WHERE relation_name IN ('Organisation', 'Person', 'Person_hasInterest_Tag', 'Person_studyAt_University',
+                        'Person_workAt_Company', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
 Organisation	7955
-Person	50
+Person	49
+Person_hasInterest_Tag	1218
+Person_studyAt_University	42
+Person_workAt_Company	100
 Place	1460
 Tag	16080
 TagClass	71
@@ -249,10 +253,16 @@ UNION ALL SELECT 'Place', COUNT(*) FROM ldbc_test.Place
 UNION ALL SELECT 'Tag', COUNT(*) FROM ldbc_test.Tag
 UNION ALL SELECT 'TagClass', COUNT(*) FROM ldbc_test.TagClass
 UNION ALL SELECT 'Person', COUNT(*) FROM ldbc_test.Person
+UNION ALL SELECT 'Person_hasInterest_Tag', COUNT(*) FROM ldbc_test.Person_hasInterest_Tag
+UNION ALL SELECT 'Person_studyAt_University', COUNT(*) FROM ldbc_test.Person_studyAt_University
+UNION ALL SELECT 'Person_workAt_Company', COUNT(*) FROM ldbc_test.Person_workAt_Company
 ORDER BY relation_name;
 ----
 Organisation	7955
-Person	50
+Person	49
+Person_hasInterest_Tag	1218
+Person_studyAt_University	42
+Person_workAt_Company	100
 Place	1460
 Tag	16080
 TagClass	71
@@ -266,7 +276,39 @@ SELECT COUNT(*),
                          AND lastName <> '')
 FROM ldbc_test.Person;
 ----
-50	50
+49	49
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_hasInterest_Tag edge
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+LEFT JOIN ldbc_test.Tag tag ON edge.TagId = tag.id
+WHERE person.id IS NULL
+   OR tag.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_studyAt_University edge
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+LEFT JOIN ldbc_test.Organisation organisation ON edge.UniversityId = organisation.id
+WHERE person.id IS NULL
+   OR organisation.id IS NULL
+   OR organisation.type <> 'University';
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_workAt_Company edge
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+LEFT JOIN ldbc_test.Organisation organisation ON edge.CompanyId = organisation.id
+WHERE person.id IS NULL
+   OR organisation.id IS NULL
+   OR organisation.type <> 'Company';
+----
+0
 
 query I
 SELECT COUNT(*)

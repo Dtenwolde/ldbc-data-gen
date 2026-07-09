@@ -8,6 +8,7 @@
 #include "duckdb/common/types/timestamp.hpp"
 
 #include <array>
+#include <unordered_map>
 
 namespace duckdb {
 
@@ -24,9 +25,14 @@ enum class LdbcRandomAspect : uint8_t {
 	COUNTRY = 39,
 	TAG = 40,
 	UNIVERSITY = 41,
+	UNCORRELATED_UNIVERSITY = 42,
+	UNCORRELATED_UNIVERSITY_LOCATION = 43,
+	TOP_UNIVERSITY = 44,
 	EMAIL = 46,
 	TOP_EMAIL = 47,
 	COMPANY = 48,
+	UNCORRELATED_COMPANY = 49,
+	UNCORRELATED_COMPANY_LOCATION = 50,
 	LANGUAGE = 52,
 	NAME = 55,
 	SURNAME = 56,
@@ -58,6 +64,8 @@ public:
 
 	int64_t RandomPersonCreationDate(LdbcJavaRandom &random) const;
 	int64_t RandomBirthday(LdbcJavaRandom &random) const;
+	int64_t RandomClassYear(LdbcJavaRandom &random, int64_t birthday) const;
+	int64_t GetWorkFromYear(LdbcJavaRandom &random, int64_t class_year, int64_t birthday) const;
 	int64_t SimulationStart() const;
 	int64_t SimulationEnd() const;
 	int64_t NetworkCollapse() const;
@@ -88,6 +96,11 @@ struct LdbcPersonCore {
 	string last_name;
 	bool message_deleter;
 	int64_t random_id;
+	vector<int32_t> interests;
+	int32_t university_location_id;
+	int64_t university_id;
+	int64_t class_year;
+	unordered_map<int64_t, int64_t> companies;
 };
 
 class LdbcPersonGenerator {

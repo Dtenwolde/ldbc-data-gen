@@ -6,6 +6,7 @@
 #include "duckdb/common/types/date.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace duckdb {
 
@@ -63,6 +64,25 @@ int64_t LdbcDateGenerator::RandomBirthday(LdbcJavaRandom &random) const {
 	return Date::EpochMilliseconds(LdbcDateFromEpochMs(epoch_ms));
 }
 
+int64_t LdbcDateGenerator::RandomClassYear(LdbcJavaRandom &random, int64_t birthday) const {
+	auto graduate_age = static_cast<int64_t>(random.NextInt(5) + 18) * ONE_YEAR_MS;
+	auto class_year = birthday + graduate_age;
+	if (class_year > simulation_end) {
+		return -1;
+	}
+	return class_year;
+}
+
+int64_t LdbcDateGenerator::GetWorkFromYear(LdbcJavaRandom &random, int64_t class_year, int64_t birthday) const {
+	if (class_year == -1) {
+		auto working_age = 18LL * ONE_YEAR_MS;
+		auto from = birthday + working_age;
+		return std::min(static_cast<int64_t>(random.NextDouble() * static_cast<double>(simulation_end - from)) + from,
+		                simulation_end);
+	}
+	return class_year + static_cast<int64_t>(random.NextDouble() * static_cast<double>(2LL * ONE_YEAR_MS));
+}
+
 int64_t LdbcDateGenerator::SimulationStart() const {
 	return simulation_start;
 }
@@ -76,7 +96,9 @@ int64_t LdbcDateGenerator::NetworkCollapse() const {
 }
 
 LdbcPersonGenerator::LdbcPersonGenerator(const LdbcDatagenConfig &config)
-    : config(config), dates(config), dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang) {
+    : config(config), dates(config),
+      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
+                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ) {
 }
 
 void LdbcPersonGenerator::ResetBlock(int64_t block_id) {
@@ -111,10 +133,22 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 	auto city_id = dictionaries.places.GetRandomCity(random_farm.Get(LdbcRandomAspect::CITY), country_id);
 	auto ip_address = dictionaries.ips.GetIP(random_farm.Get(LdbcRandomAspect::IP), country_id);
 
-	// The full Person generator consumes additional dictionary-backed RNG streams here. Until those dictionaries are
-	// ported, this core generator only exposes fields that are already backed by local dictionary implementations.
 	auto message_deleter = random_farm.Get(LdbcRandomAspect::RANDOM).NextDouble() > 0.5;
 	auto account_id = ComposePersonId(sequential_id, creation_date);
+	auto main_interest =
+	    dictionaries.tags.GetTagByCountry(random_farm.Get(LdbcRandomAspect::TAG_OTHER_COUNTRY),
+	                                      random_farm.Get(LdbcRandomAspect::TAG), country_id);
+	auto tag_count = static_cast<int32_t>(
+	    static_cast<double>(config.min_num_tags_per_person) +
+	    static_cast<double>(config.max_num_tags_per_person + 1 - config.min_num_tags_per_person) *
+	        std::pow(random_farm.Get(LdbcRandomAspect::NUM_TAG).NextDouble(), 1.0 / LdbcDatagenConfig::ALPHA));
+	auto interests = dictionaries.tag_matrix.GetSetOfTags(random_farm.Get(LdbcRandomAspect::TOPIC),
+	                                                      random_farm.Get(LdbcRandomAspect::TAG_OTHER_COUNTRY),
+	                                                      main_interest, tag_count);
+	auto university_location_id = dictionaries.universities.GetRandomUniversityLocation(
+	    random_farm.Get(LdbcRandomAspect::UNCORRELATED_UNIVERSITY),
+	    random_farm.Get(LdbcRandomAspect::UNCORRELATED_UNIVERSITY_LOCATION), random_farm.Get(LdbcRandomAspect::TOP_UNIVERSITY),
+	    random_farm.Get(LdbcRandomAspect::UNIVERSITY), country_id);
 	auto random_id = random_farm.Get(LdbcRandomAspect::RANDOM).NextInt(NumericLimits<int32_t>::Maximum()) % 100;
 	auto languages = dictionaries.languages.GetLanguageList(random_farm.Get(LdbcRandomAspect::LANGUAGE), country_id);
 	auto birth_year = Date::ExtractYear(LdbcDateFromEpochMs(birthday));
@@ -139,6 +173,24 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 		}
 		email_list += emails[email_idx];
 	}
+	auto class_probability = random_farm.Get(LdbcRandomAspect::EXTRA_INFO).NextDouble();
+	auto class_year = class_probability < config.missing_ratio || university_location_id == -1
+	                      ? int64_t(-1)
+	                      : dates.RandomClassYear(random_farm.Get(LdbcRandomAspect::DATE), birthday);
+	auto university_id =
+	    university_location_id == -1 ? int64_t(-1) : dictionaries.universities.GetUniversityFromLocation(university_location_id);
+	auto company_count = random_farm.Get(LdbcRandomAspect::EXTRA_INFO).NextInt(config.max_companies) + 1;
+	auto company_probability = random_farm.Get(LdbcRandomAspect::EXTRA_INFO).NextDouble();
+	unordered_map<int64_t, int64_t> companies;
+	if (company_probability >= config.missing_ratio) {
+		for (int32_t company_idx = 0; company_idx < company_count; company_idx++) {
+			auto work_from = dates.GetWorkFromYear(random_farm.Get(LdbcRandomAspect::DATE), class_year, birthday);
+			auto company = dictionaries.companies.GetRandomCompany(random_farm.Get(LdbcRandomAspect::UNCORRELATED_COMPANY),
+			                                                       random_farm.Get(LdbcRandomAspect::UNCORRELATED_COMPANY_LOCATION),
+			                                                       random_farm.Get(LdbcRandomAspect::COMPANY), country_id);
+			companies[company] = work_from;
+		}
+	}
 
 	LdbcPersonCore result;
 	result.sequential_id = sequential_id;
@@ -159,6 +211,11 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 	result.last_name = last_name;
 	result.message_deleter = message_deleter;
 	result.random_id = random_id;
+	result.interests = std::move(interests);
+	result.university_location_id = university_location_id;
+	result.university_id = university_id;
+	result.class_year = class_year;
+	result.companies = std::move(companies);
 	return result;
 }
 

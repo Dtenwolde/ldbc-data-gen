@@ -7,6 +7,3 @@ duckdb_extension_load(icu)
 duckdb_extension_load(ldbc_data_gen
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
 )
-
-# Any extra extensions that should be built
-# e.g.: duckdb_extension_load(json)

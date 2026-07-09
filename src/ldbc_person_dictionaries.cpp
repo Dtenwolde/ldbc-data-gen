@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 
 namespace duckdb {
@@ -50,6 +52,20 @@ static string TrimWhitespaceLocal(const string &value) {
 	return value.substr(start, end - start);
 }
 
+static vector<string> SplitByDelimiterLocal(const string &line, const string &delimiter) {
+	vector<string> result;
+	idx_t offset = 0;
+	while (true) {
+		auto next = line.find(delimiter, offset);
+		if (next == string::npos) {
+			result.push_back(TrimWhitespaceLocal(line.substr(offset)));
+			return result;
+		}
+		result.push_back(TrimWhitespaceLocal(line.substr(offset, next - offset)));
+		offset = next + delimiter.size();
+	}
+}
+
 static std::ifstream OpenDictionaryPath(const string &dictionary_dir, const string &file_name) {
 	auto path = LdbcResourcePath(dictionary_dir, file_name);
 	std::ifstream file(path);
@@ -57,6 +73,21 @@ static std::ifstream OpenDictionaryPath(const string &dictionary_dir, const stri
 		throw IOException("Could not open LDBC dictionary file '%s'", path);
 	}
 	return file;
+}
+
+static int32_t JavaRoundToInt(double value) {
+	return static_cast<int32_t>(std::floor(value + 0.5));
+}
+
+static int32_t ZOrderValue(int32_t x, int32_t y) {
+	int32_t result = 0;
+	for (int32_t bit = 7; bit >= 0; bit--) {
+		result <<= 1;
+		result |= (x >> bit) & 1;
+		result <<= 1;
+		result |= (y >> bit) & 1;
+	}
+	return result;
 }
 
 } // namespace
@@ -111,6 +142,7 @@ const string &LdbcBrowserDictionary::GetName(int32_t id) const {
 LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
 	auto locations = OpenDictionaryPath(dictionary_dir, "dicLocations.txt");
 	string line;
+	vector<std::pair<int32_t, int32_t>> zorder_by_country;
 	while (std::getline(locations, line)) {
 		line = StripCarriageReturnLocal(line);
 		if (line.empty()) {
@@ -126,11 +158,24 @@ LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
 		countries.push_back(country_id);
 		cities_by_country[country_id] = vector<int32_t>();
 		cumulative_distribution.push_back(std::stof(columns[5]));
+		auto longitude = std::stod(columns[3]);
+		auto latitude = std::stod(columns[2]);
+		auto x = (JavaRoundToInt(longitude) + 180) / 2;
+		auto y = (JavaRoundToInt(latitude) + 180) / 2;
+		zorder_by_country.emplace_back(country_id, ZOrderValue(x, y));
+	}
+	std::stable_sort(zorder_by_country.begin(), zorder_by_country.end(),
+	                 [](const std::pair<int32_t, int32_t> &left, const std::pair<int32_t, int32_t> &right) {
+		                 return left.second < right.second;
+	                 });
+	country_zorder_by_id.resize(countries.size());
+	for (idx_t zorder_id = 0; zorder_id < zorder_by_country.size(); zorder_id++) {
+		country_zorder_by_id[zorder_by_country[zorder_id].first] = NumericCast<int32_t>(zorder_id);
+		place_id_by_zorder.push_back(zorder_by_country[zorder_id].first);
 	}
 
 	auto cities = OpenDictionaryPath(dictionary_dir, "citiesByCountry.txt");
 	int32_t next_place_id = NumericCast<int32_t>(countries.size());
-	unordered_map<string, int32_t> city_names;
 	while (std::getline(cities, line)) {
 		line = StripCarriageReturnLocal(line);
 		if (line.empty()) {
@@ -185,6 +230,28 @@ int32_t LdbcPlaceDictionary::GetCountryId(const string &country_name) const {
 		return -1;
 	}
 	return entry->second;
+}
+
+int32_t LdbcPlaceDictionary::GetCityId(const string &city_name) const {
+	auto entry = city_names.find(city_name);
+	if (entry == city_names.end()) {
+		return -1;
+	}
+	return entry->second;
+}
+
+int32_t LdbcPlaceDictionary::GetZOrderId(int32_t place_id) const {
+	if (place_id < 0 || static_cast<idx_t>(place_id) >= country_zorder_by_id.size()) {
+		throw InvalidInputException("LDBC place id %d does not have a country z-order id", place_id);
+	}
+	return country_zorder_by_id[place_id];
+}
+
+int32_t LdbcPlaceDictionary::GetPlaceIdFromZOrder(int32_t zorder_id) const {
+	if (zorder_id < 0 || static_cast<idx_t>(zorder_id) >= place_id_by_zorder.size()) {
+		throw InvalidInputException("LDBC z-order id %d is out of range", zorder_id);
+	}
+	return place_id_by_zorder[zorder_id];
 }
 
 LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, const LdbcPlaceDictionary &places) {
@@ -537,12 +604,223 @@ string LdbcEmailDictionary::GetRandomEmail(LdbcJavaRandom &random_top, LdbcJavaR
 	return emails[max_idx];
 }
 
-LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang)
+LdbcTagDictionary::LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob)
+    : tag_country_corr_prob(tag_country_corr_prob), tags_by_country(country_count),
+      cumulative_distribution_by_country(country_count) {
+	auto file = OpenDictionaryPath(dictionary_dir, "popularTagByCountry.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed popularTagByCountry.txt line: '%s'", line);
+		}
+		auto country_id = NumericCast<idx_t>(std::stoi(columns[0]));
+		if (country_id >= country_count) {
+			throw InvalidInputException("popularTagByCountry.txt country id out of range: '%s'", line);
+		}
+		tags_by_country[country_id].push_back(std::stoi(columns[1]));
+		cumulative_distribution_by_country[country_id].push_back(std::stod(columns[2]));
+	}
+}
+
+int32_t LdbcTagDictionary::GetTagByCountry(LdbcJavaRandom &random_tag_other_country,
+                                           LdbcJavaRandom &random_tag_country_prob, int32_t country_id) const {
+	if (country_id < 0 || static_cast<idx_t>(country_id) >= tags_by_country.size()) {
+		throw InvalidInputException("LDBC tag country id out of range");
+	}
+	if (tags_by_country[country_id].empty() || random_tag_other_country.NextDouble() > tag_country_corr_prob) {
+		do {
+			country_id = random_tag_other_country.NextInt(NumericCast<int32_t>(tags_by_country.size()));
+		} while (tags_by_country[country_id].empty());
+	}
+
+	auto random_distance = random_tag_country_prob.NextDouble();
+	idx_t lower_bound = 0;
+	idx_t upper_bound = tags_by_country[country_id].size();
+	idx_t current_idx = (upper_bound + lower_bound) / 2;
+	while (upper_bound > lower_bound + 1) {
+		if (cumulative_distribution_by_country[country_id][current_idx] > random_distance) {
+			upper_bound = current_idx;
+		} else {
+			lower_bound = current_idx;
+		}
+		current_idx = (upper_bound + lower_bound) / 2;
+	}
+	return tags_by_country[country_id][current_idx];
+}
+
+LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {
+	auto file = OpenDictionaryPath(dictionary_dir, "tagMatrix.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed tagMatrix.txt line: '%s'", line);
+		}
+		auto celebrity_id = std::stoi(columns[0]);
+		auto topic_id = std::stoi(columns[1]);
+		auto cumulative = std::stod(columns[2]);
+		related_tags[celebrity_id].push_back(topic_id);
+		cumulative_distribution[celebrity_id].push_back(cumulative);
+	}
+	std::map<int32_t, bool> sorted_tags;
+	for (auto &entry : related_tags) {
+		sorted_tags[entry.first] = true;
+	}
+	for (auto &entry : sorted_tags) {
+		non_zero_tags.push_back(entry.first);
+	}
+}
+
+vector<int32_t> LdbcTagMatrix::GetSetOfTags(LdbcJavaRandom &random_topic, LdbcJavaRandom &random_tag,
+                                            int32_t popular_tag_id, int32_t tag_count) const {
+	std::set<int32_t> result_tags;
+	result_tags.insert(popular_tag_id);
+	while (NumericCast<int32_t>(result_tags.size()) < tag_count) {
+		auto tag_id = popular_tag_id;
+		auto related = related_tags.find(tag_id);
+		if (related == related_tags.end()) {
+			tag_id = non_zero_tags[random_tag.NextInt(NumericCast<int32_t>(non_zero_tags.size()))];
+			related = related_tags.find(tag_id);
+		}
+		auto cumulative = cumulative_distribution.find(tag_id);
+		auto random_distance = random_tag.NextDouble();
+		idx_t lower_bound = 0;
+		idx_t upper_bound = related->second.size();
+		idx_t mid_point = (upper_bound + lower_bound) / 2;
+		while (upper_bound > lower_bound + 1) {
+			if (cumulative->second[mid_point] > random_distance) {
+				upper_bound = mid_point;
+			} else {
+				lower_bound = mid_point;
+			}
+			mid_point = (upper_bound + lower_bound) / 2;
+		}
+		result_tags.insert(related->second[mid_point]);
+	}
+	return vector<int32_t>(result_tags.begin(), result_tags.end());
+}
+
+LdbcCompanyDictionary::LdbcCompanyDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,
+                                             double prob_uncorrelated_company)
+    : places(places), prob_uncorrelated_company(prob_uncorrelated_company),
+      companies_by_country(places.GetCountries().size()) {
+	auto file = OpenDictionaryPath(dictionary_dir, "companiesByCountry.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiterLocal(line, "  ");
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed companiesByCountry.txt line: '%s'", line);
+		}
+		auto country_id = places.GetCountryId(columns[0]);
+		if (country_id != -1) {
+			companies_by_country[country_id].push_back(NumericCast<int64_t>(company_count));
+			company_count++;
+		}
+	}
+}
+
+int64_t LdbcCompanyDictionary::GetRandomCompany(LdbcJavaRandom &random_uncorrelated_company,
+                                                LdbcJavaRandom &random_uncorrelated_location,
+                                                LdbcJavaRandom &random_company, int32_t country_id) const {
+	auto location_id = country_id;
+	auto &countries = places.GetCountries();
+	if (random_uncorrelated_company.NextDouble() <= prob_uncorrelated_company) {
+		location_id = countries[random_uncorrelated_location.NextInt(NumericCast<int32_t>(countries.size()))];
+	}
+	while (companies_by_country[location_id].empty()) {
+		location_id = countries[random_uncorrelated_location.NextInt(NumericCast<int32_t>(countries.size()))];
+	}
+	auto company_idx = random_company.NextInt(NumericCast<int32_t>(companies_by_country[location_id].size()));
+	return companies_by_country[location_id][company_idx];
+}
+
+idx_t LdbcCompanyDictionary::GetCompanyCount() const {
+	return company_count;
+}
+
+LdbcUniversityDictionary::LdbcUniversityDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,
+                                                   double prob_uncorrelated_university, double prob_top_university,
+                                                   int64_t start_index)
+    : places(places), prob_uncorrelated_university(prob_uncorrelated_university),
+      prob_top_university(prob_top_university), start_index(start_index),
+      universities_by_country(places.GetCountries().size()) {
+	auto file = OpenDictionaryPath(dictionary_dir, "universities.txt");
+	string line;
+	int64_t next_university_id = start_index;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitByDelimiterLocal(line, "  ");
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed universities.txt line: '%s'", line);
+		}
+		auto country_id = places.GetCountryId(columns[0]);
+		auto city_id = places.GetCityId(columns[2]);
+		if (country_id != -1 && city_id != -1) {
+			universities_by_country[country_id].push_back(next_university_id);
+			next_university_id++;
+		}
+	}
+}
+
+int32_t LdbcUniversityDictionary::GetRandomUniversityLocation(LdbcJavaRandom &random_uncorrelated_university,
+                                                             LdbcJavaRandom &random_uncorrelated_location,
+                                                             LdbcJavaRandom &random_top_university,
+                                                             LdbcJavaRandom &random_university,
+                                                             int32_t country_id) const {
+	auto probability = random_uncorrelated_university.NextDouble();
+	auto &countries = places.GetCountries();
+	if (random_uncorrelated_university.NextDouble() <= prob_uncorrelated_university) {
+		country_id = countries[random_uncorrelated_location.NextInt(NumericCast<int32_t>(countries.size()))];
+	}
+	while (universities_by_country[country_id].empty()) {
+		country_id = countries[random_uncorrelated_location.NextInt(NumericCast<int32_t>(countries.size()))];
+	}
+	auto range = universities_by_country[country_id].size();
+	if (probability > prob_uncorrelated_university && random_top_university.NextDouble() < prob_top_university) {
+		range = std::min<idx_t>(range, 10);
+	}
+	auto random_university_idx = random_university.NextInt(NumericCast<int32_t>(range));
+	auto zorder_location = places.GetZOrderId(country_id);
+	return (zorder_location << 24) | (random_university_idx << 12);
+}
+
+int64_t LdbcUniversityDictionary::GetUniversityFromLocation(int32_t university_location) const {
+	auto zorder_location_id = university_location >> 24;
+	auto university_id = (university_location >> 12) & 0x0FFF;
+	auto location_id = places.GetPlaceIdFromZOrder(zorder_location_id);
+	return universities_by_country[location_id][university_id];
+}
+
+LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang,
+                                               double tag_country_corr_prob, double prob_uncorrelated_company,
+                                               double prob_uncorrelated_university, double prob_top_university)
     : browsers(LdbcResourcePath(resource_dir, "dictionaries")), places(LdbcResourcePath(resource_dir, "dictionaries")),
       ips(resource_dir, places),
       languages(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_english, prob_second_lang),
       names(LdbcResourcePath(resource_dir, "dictionaries"), places),
-      emails(LdbcResourcePath(resource_dir, "dictionaries")) {
+      emails(LdbcResourcePath(resource_dir, "dictionaries")),
+      tags(LdbcResourcePath(resource_dir, "dictionaries"), places.GetCountries().size(), tag_country_corr_prob),
+      tag_matrix(LdbcResourcePath(resource_dir, "dictionaries")),
+      companies(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_company),
+      universities(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_university,
+                   prob_top_university,
+                   NumericCast<int64_t>(companies.GetCompanyCount())) {
 }
 
 } // namespace duckdb
