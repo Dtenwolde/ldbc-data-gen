@@ -28,6 +28,8 @@ build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
 
 target_link_libraries(${LOADABLE_EXTENSION_NAME} "$<LINK_ONLY:duckdb_icu_common>" "$<LINK_ONLY:duckdb_icu_i18n>"
                       "$<LINK_ONLY:duckdb_icu_stubdata>")
+target_sources(${LOADABLE_EXTENSION_NAME} PRIVATE $<TARGET_OBJECTS:duckdb_icu_common_unity>
+                                                  $<TARGET_OBJECTS:duckdb_icu_i18n_unity>)
 
 install(
   TARGETS ${EXTENSION_NAME}

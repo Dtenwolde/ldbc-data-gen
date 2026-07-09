@@ -231,7 +231,7 @@ struct LdbcGenPersonCoreGlobalState : public GlobalTableFunctionState {
 };
 
 static string GetStringParameter(TableFunctionBindInput &input, const string &name, const string &default_value) {
-	auto entry = input.named_parameters.find(name);
+	auto entry = input.named_parameters.find(Identifier(name));
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
 		return default_value;
 	}
@@ -239,7 +239,7 @@ static string GetStringParameter(TableFunctionBindInput &input, const string &na
 }
 
 static double GetDoubleParameter(TableFunctionBindInput &input, const string &name, double default_value) {
-	auto entry = input.named_parameters.find(name);
+	auto entry = input.named_parameters.find(Identifier(name));
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
 		return default_value;
 	}
@@ -247,7 +247,7 @@ static double GetDoubleParameter(TableFunctionBindInput &input, const string &na
 }
 
 static bool GetBooleanParameter(TableFunctionBindInput &input, const string &name, bool default_value) {
-	auto entry = input.named_parameters.find(name);
+	auto entry = input.named_parameters.find(Identifier(name));
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
 		return default_value;
 	}
@@ -255,7 +255,7 @@ static bool GetBooleanParameter(TableFunctionBindInput &input, const string &nam
 }
 
 static int64_t GetBigIntParameter(TableFunctionBindInput &input, const string &name, int64_t default_value) {
-	auto entry = input.named_parameters.find(name);
+	auto entry = input.named_parameters.find(Identifier(name));
 	if (entry == input.named_parameters.end() || entry->second.IsNull()) {
 		return default_value;
 	}
@@ -305,8 +305,7 @@ static vector<Identifier> SplitPrimaryKey(const string &primary_key) {
 static void CreateSchemaIfNeeded(ClientContext &context, const string &catalog_name, const string &schema) {
 	auto &catalog = Catalog::GetCatalog(context, Identifier(catalog_name));
 	CreateSchemaInfo info;
-	info.catalog = catalog_name;
-	info.schema = schema;
+	info.SetQualifiedName(QualifiedName(Identifier(catalog_name), Identifier(schema), Identifier()));
 	info.on_conflict = OnCreateConflict::IGNORE_ON_CONFLICT;
 	catalog.CreateSchema(context, info);
 }
@@ -315,9 +314,7 @@ static void DropTableIfNeeded(ClientContext &context, const string &catalog_name
                               const string &table_name) {
 	DropInfo drop_info;
 	drop_info.type = CatalogType::TABLE_ENTRY;
-	drop_info.catalog = catalog_name;
-	drop_info.schema = schema;
-	drop_info.name = table_name;
+	drop_info.SetQualifiedName(Identifier(catalog_name), Identifier(schema), Identifier(table_name));
 	drop_info.if_not_found = OnEntryNotFound::RETURN_NULL;
 	Catalog::GetCatalog(context, Identifier(catalog_name)).DropEntry(context, drop_info);
 }
@@ -566,8 +563,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 
 static unique_ptr<InternalAppender> MakeStaticAppender(ClientContext &context, const LdbcGenBindData &bind_data,
                                                        const string &table_name) {
-	auto &catalog = Catalog::GetCatalog(context, bind_data.catalog);
-	auto &table = catalog.GetEntry<TableCatalogEntry>(context, bind_data.schema, table_name);
+	auto &catalog = Catalog::GetCatalog(context, Identifier(bind_data.catalog));
+	auto &table = catalog.GetEntry<TableCatalogEntry>(context, Identifier(bind_data.schema), Identifier(table_name));
 	if (!table.IsDuckTable()) {
 		throw InvalidInputException("ldbcgen can only append generated data to DuckDB tables");
 	}
