@@ -205,9 +205,13 @@ query TI
 SELECT relation_name, row_count
 FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
 WHERE relation_name IN ('Organisation', 'Person', 'Person_hasInterest_Tag', 'Person_studyAt_University',
-                        'Person_workAt_Company', 'Person_knows_Person', 'Place', 'Tag', 'TagClass')
+                        'Person_workAt_Company', 'Person_knows_Person', 'Forum', 'Forum_hasMember_Person',
+                        'Forum_hasTag_Tag', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
+Forum	428
+Forum_hasMember_Person	1632
+Forum_hasTag_Tag	1634
 Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256
@@ -258,8 +262,14 @@ UNION ALL SELECT 'Person_hasInterest_Tag', COUNT(*) FROM ldbc_test.Person_hasInt
 UNION ALL SELECT 'Person_knows_Person', COUNT(*) FROM ldbc_test.Person_knows_Person
 UNION ALL SELECT 'Person_studyAt_University', COUNT(*) FROM ldbc_test.Person_studyAt_University
 UNION ALL SELECT 'Person_workAt_Company', COUNT(*) FROM ldbc_test.Person_workAt_Company
+UNION ALL SELECT 'Forum', COUNT(*) FROM ldbc_test.Forum
+UNION ALL SELECT 'Forum_hasMember_Person', COUNT(*) FROM ldbc_test.Forum_hasMember_Person
+UNION ALL SELECT 'Forum_hasTag_Tag', COUNT(*) FROM ldbc_test.Forum_hasTag_Tag
 ORDER BY relation_name;
 ----
+Forum	428
+Forum_hasMember_Person	1632
+Forum_hasTag_Tag	1634
 Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256
@@ -321,6 +331,35 @@ LEFT JOIN ldbc_test.Person person2 ON edge.Person2Id = person2.id
 WHERE person1.id IS NULL
    OR person2.id IS NULL
    OR edge.Person1Id >= edge.Person2Id;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Forum forum
+LEFT JOIN ldbc_test.Person moderator ON forum.ModeratorPersonId = moderator.id
+WHERE moderator.id IS NULL
+   OR forum.title = '';
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Forum_hasMember_Person edge
+LEFT JOIN ldbc_test.Forum forum ON edge.ForumId = forum.id
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+WHERE forum.id IS NULL
+   OR person.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Forum_hasTag_Tag edge
+LEFT JOIN ldbc_test.Forum forum ON edge.ForumId = forum.id
+LEFT JOIN ldbc_test.Tag tag ON edge.TagId = tag.id
+WHERE forum.id IS NULL
+   OR tag.id IS NULL;
 ----
 0
 

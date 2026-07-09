@@ -196,6 +196,24 @@ LdbcDatagenConfig LdbcDatagenConfig::Load(double scale_factor, const string &res
 	config.prob_uncorrelated_organisation = DoubleProperty(config.properties, "generator.probUnCorrelatedOrganisation");
 	config.prob_top_univ = DoubleProperty(config.properties, "generator.probTopUniv");
 	config.tag_country_corr_prob = DoubleProperty(config.properties, "generator.tagCountryCorrProb");
+	config.max_num_post_per_month = IntProperty(config.properties, "generator.maxNumPostPerMonth");
+	config.max_num_comments = IntProperty(config.properties, "generator.maxNumComments");
+	config.max_num_flashmob_post_per_month = IntProperty(config.properties, "generator.maxNumFlashmobPostPerMonth");
+	config.max_num_group_created_per_person = IntProperty(config.properties, "generator.maxNumGroupCreatedPerPerson");
+	config.max_num_group_flashmob_post_per_month = IntProperty(config.properties, "generator.maxNumGroupFlashmobPostPerMonth");
+	config.max_num_group_post_per_month = IntProperty(config.properties, "generator.maxNumGroupPostPerMonth");
+	config.max_num_like = IntProperty(config.properties, "generator.maxNumLike");
+	config.max_group_size = IntProperty(config.properties, "generator.maxNumMemberGroup");
+	config.max_num_photo_albums_per_month = IntProperty(config.properties, "generator.maxNumPhotoAlbumsPerMonth");
+	config.max_num_photo_per_albums = IntProperty(config.properties, "generator.maxNumPhotoPerAlbums");
+	config.max_num_popular_places = IntProperty(config.properties, "generator.maxNumPopularPlaces");
+	config.max_num_tag_per_flashmob_post = IntProperty(config.properties, "generator.maxNumTagPerFlashmobPost");
+	config.group_moderator_prob = DoubleProperty(config.properties, "generator.groupModeratorProb");
+	config.prob_forum_deleted = DoubleProperty(config.properties, "generator.probForumDeleted");
+	config.prob_memb_deleted = DoubleProperty(config.properties, "generator.probMembDeleted");
+	config.prob_photo_deleted = DoubleProperty(config.properties, "generator.probPhotoDeleted");
+	config.prob_comment_deleted = DoubleProperty(config.properties, "generator.probCommentDeleted");
+	config.prob_like_deleted = DoubleProperty(config.properties, "generator.probLikeDeleted");
 	return config;
 }
 

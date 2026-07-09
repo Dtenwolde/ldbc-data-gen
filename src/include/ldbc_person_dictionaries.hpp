@@ -29,6 +29,7 @@ public:
 	int32_t GetRandomCity(LdbcJavaRandom &random, int32_t country_id) const;
 	const vector<int32_t> &GetCountries() const;
 	const string &GetCountryName(int32_t country_id) const;
+	const string &GetPlaceName(int32_t place_id) const;
 	int32_t GetCountryId(const string &country_name) const;
 	int32_t GetCityId(const string &city_name) const;
 	int32_t GetZOrderId(int32_t place_id) const;
@@ -38,6 +39,7 @@ private:
 	vector<float> cumulative_distribution;
 	vector<int32_t> countries;
 	vector<string> country_names_by_id;
+	vector<string> place_names_by_id;
 	unordered_map<string, int32_t> country_names;
 	unordered_map<string, int32_t> city_names;
 	unordered_map<int32_t, vector<int32_t>> cities_by_country;
@@ -122,9 +124,11 @@ public:
 
 	int32_t GetTagByCountry(LdbcJavaRandom &random_tag_other_country, LdbcJavaRandom &random_tag_country_prob,
 	                        int32_t country_id) const;
+	const string &GetName(int32_t tag_id) const;
 
 private:
 	double tag_country_corr_prob;
+	vector<string> tag_names;
 	vector<vector<int32_t>> tags_by_country;
 	vector<vector<double>> cumulative_distribution_by_country;
 };

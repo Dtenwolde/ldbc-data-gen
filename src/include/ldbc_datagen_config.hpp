@@ -35,6 +35,24 @@ struct LdbcDatagenConfig {
 	double prob_uncorrelated_organisation;
 	double prob_top_univ;
 	double tag_country_corr_prob;
+	int32_t max_num_post_per_month;
+	int32_t max_num_comments;
+	int32_t max_num_flashmob_post_per_month;
+	int32_t max_num_group_created_per_person;
+	int32_t max_num_group_flashmob_post_per_month;
+	int32_t max_num_group_post_per_month;
+	int32_t max_num_like;
+	int32_t max_group_size;
+	int32_t max_num_photo_albums_per_month;
+	int32_t max_num_photo_per_albums;
+	int32_t max_num_popular_places;
+	int32_t max_num_tag_per_flashmob_post;
+	double group_moderator_prob;
+	double prob_forum_deleted;
+	double prob_memb_deleted;
+	double prob_photo_deleted;
+	double prob_comment_deleted;
+	double prob_like_deleted;
 	double bulkload_portion = 0.97;
 
 	static constexpr const char *DEFAULT_RESOURCE_DIR =

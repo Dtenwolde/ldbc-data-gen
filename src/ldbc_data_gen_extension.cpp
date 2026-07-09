@@ -711,6 +711,9 @@ struct PersonOwnedRowCounts {
 	idx_t study_at = 0;
 	idx_t work_at = 0;
 	idx_t knows = 0;
+	idx_t forums = 0;
+	idx_t forum_members = 0;
+	idx_t forum_tags = 0;
 };
 
 static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
@@ -723,6 +726,9 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
 	auto work_appender = MakeStaticAppender(context, bind_data, "Person_workAt_Company");
 	auto knows_appender = MakeStaticAppender(context, bind_data, "Person_knows_Person");
+	auto forum_appender = MakeStaticAppender(context, bind_data, "Forum");
+	auto forum_member_appender = MakeStaticAppender(context, bind_data, "Forum_hasMember_Person");
+	auto forum_tag_appender = MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
 	                                                 (1.0 - config.bulkload_portion));
@@ -790,11 +796,48 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 		knows_appender->EndRow();
 		row_counts.knows++;
 	}
+
+	auto forums = LdbcGenerateForums(config, persons, knows_edges);
+	for (auto &forum : forums) {
+		if (forum.creation_date < bulkload_threshold) {
+			forum_appender->BeginRow();
+			forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
+			forum_appender->Append<int64_t>(forum.id);
+			forum_appender->Append(Value(forum.title));
+			forum_appender->Append<int64_t>(forum.moderator_person_id);
+			forum_appender->EndRow();
+			row_counts.forums++;
+
+			for (auto tag_id : forum.tags) {
+				forum_tag_appender->BeginRow();
+				forum_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
+				forum_tag_appender->Append<int64_t>(forum.id);
+				forum_tag_appender->Append<int32_t>(tag_id);
+				forum_tag_appender->EndRow();
+				row_counts.forum_tags++;
+			}
+		}
+
+		for (auto &membership : forum.memberships) {
+			if (membership.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			forum_member_appender->BeginRow();
+			forum_member_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(membership.creation_date)));
+			forum_member_appender->Append<int64_t>(membership.forum_id);
+			forum_member_appender->Append<int64_t>(membership.person_id);
+			forum_member_appender->EndRow();
+			row_counts.forum_members++;
+		}
+	}
 	person_appender->Close();
 	interest_appender->Close();
 	study_appender->Close();
 	work_appender->Close();
 	knows_appender->Close();
+	forum_appender->Close();
+	forum_member_appender->Close();
+	forum_tag_appender->Close();
 	return row_counts;
 }
 
@@ -811,6 +854,9 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	row_counts["Person_knows_Person"] = person_counts.knows;
 	row_counts["Person_studyAt_University"] = person_counts.study_at;
 	row_counts["Person_workAt_Company"] = person_counts.work_at;
+	row_counts["Forum"] = person_counts.forums;
+	row_counts["Forum_hasMember_Person"] = person_counts.forum_members;
+	row_counts["Forum_hasTag_Tag"] = person_counts.forum_tags;
 	return row_counts;
 }
 
@@ -1127,6 +1173,40 @@ static vector<LdbcGenConfigEntry> BuildConfigEntries(const LdbcDatagenConfig &co
 	               "DOUBLE", "params_default.ini");
 	AddConfigEntry(entries, "prob_top_univ", DoubleToConfigString(config.prob_top_univ), "DOUBLE", "params_default.ini");
 	AddConfigEntry(entries, "tag_country_corr_prob", DoubleToConfigString(config.tag_country_corr_prob), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_post_per_month", std::to_string(config.max_num_post_per_month), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_comments", std::to_string(config.max_num_comments), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_flashmob_post_per_month",
+	               std::to_string(config.max_num_flashmob_post_per_month), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_group_created_per_person",
+	               std::to_string(config.max_num_group_created_per_person), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_group_flashmob_post_per_month",
+	               std::to_string(config.max_num_group_flashmob_post_per_month), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_group_post_per_month", std::to_string(config.max_num_group_post_per_month),
+	               "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_like", std::to_string(config.max_num_like), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_group_size", std::to_string(config.max_group_size), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_photo_albums_per_month",
+	               std::to_string(config.max_num_photo_albums_per_month), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_num_photo_per_albums", std::to_string(config.max_num_photo_per_albums), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_popular_places", std::to_string(config.max_num_popular_places), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_tag_per_flashmob_post",
+	               std::to_string(config.max_num_tag_per_flashmob_post), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "group_moderator_prob", DoubleToConfigString(config.group_moderator_prob), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_forum_deleted", DoubleToConfigString(config.prob_forum_deleted), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_memb_deleted", DoubleToConfigString(config.prob_memb_deleted), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_photo_deleted", DoubleToConfigString(config.prob_photo_deleted), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_comment_deleted", DoubleToConfigString(config.prob_comment_deleted), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_like_deleted", DoubleToConfigString(config.prob_like_deleted), "DOUBLE",
 	               "params_default.ini");
 	AddConfigEntry(entries, "alpha", DoubleToConfigString(LdbcDatagenConfig::ALPHA), "DOUBLE", "DatagenParams.java");
 	AddConfigEntry(entries, "bulkload_portion", DoubleToConfigString(config.bulkload_portion), "DOUBLE",

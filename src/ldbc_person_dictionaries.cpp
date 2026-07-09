@@ -155,6 +155,7 @@ LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
 		auto country_id = NumericCast<int32_t>(countries.size());
 		country_names[columns[1]] = country_id;
 		country_names_by_id.push_back(columns[1]);
+		place_names_by_id.push_back(columns[1]);
 		countries.push_back(country_id);
 		cities_by_country[country_id] = vector<int32_t>();
 		cumulative_distribution.push_back(std::stof(columns[5]));
@@ -191,6 +192,10 @@ LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
 		}
 		auto city_id = next_place_id++;
 		city_names[columns[1]] = city_id;
+		if (static_cast<idx_t>(city_id) >= place_names_by_id.size()) {
+			place_names_by_id.resize(NumericCast<idx_t>(city_id) + 1);
+		}
+		place_names_by_id[city_id] = columns[1];
 		cities_by_country[country->second].push_back(city_id);
 	}
 }
@@ -222,6 +227,13 @@ const string &LdbcPlaceDictionary::GetCountryName(int32_t country_id) const {
 		throw InternalException("LDBC country id out of range");
 	}
 	return country_names_by_id[country_id];
+}
+
+const string &LdbcPlaceDictionary::GetPlaceName(int32_t place_id) const {
+	if (place_id < 0 || static_cast<idx_t>(place_id) >= place_names_by_id.size()) {
+		throw InternalException("LDBC place id out of range");
+	}
+	return place_names_by_id[place_id];
 }
 
 int32_t LdbcPlaceDictionary::GetCountryId(const string &country_name) const {
@@ -629,8 +641,25 @@ bool LdbcPersonDeleteDistribution::IsDeleted(LdbcJavaRandom &random, int64_t max
 LdbcTagDictionary::LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob)
     : tag_country_corr_prob(tag_country_corr_prob), tags_by_country(country_count),
       cumulative_distribution_by_country(country_count) {
-	auto file = OpenDictionaryPath(dictionary_dir, "popularTagByCountry.txt");
+	auto tags_file = OpenDictionaryPath(dictionary_dir, "tags.txt");
 	string line;
+	while (std::getline(tags_file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.size() < 3) {
+			throw InvalidInputException("Malformed tags.txt line: '%s'", line);
+		}
+		auto tag_id = NumericCast<idx_t>(std::stoi(columns[0]));
+		if (tag_id >= tag_names.size()) {
+			tag_names.resize(tag_id + 1);
+		}
+		tag_names[tag_id] = columns[2];
+	}
+
+	auto file = OpenDictionaryPath(dictionary_dir, "popularTagByCountry.txt");
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
 		if (line.empty()) {
@@ -673,6 +702,13 @@ int32_t LdbcTagDictionary::GetTagByCountry(LdbcJavaRandom &random_tag_other_coun
 		current_idx = (upper_bound + lower_bound) / 2;
 	}
 	return tags_by_country[country_id][current_idx];
+}
+
+const string &LdbcTagDictionary::GetName(int32_t tag_id) const {
+	if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_names.size() || tag_names[tag_id].empty()) {
+		throw InternalException("LDBC tag id out of range");
+	}
+	return tag_names[tag_id];
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {

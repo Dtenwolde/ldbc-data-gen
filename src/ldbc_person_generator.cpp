@@ -19,6 +19,13 @@ static idx_t AspectIndex(LdbcRandomAspect aspect) {
 	return static_cast<idx_t>(aspect);
 }
 
+static string ClampStringLocal(const string &value, idx_t max_length) {
+	if (value.size() <= max_length) {
+		return value;
+	}
+	return value.substr(0, max_length);
+}
+
 } // namespace
 
 LdbcRandomGeneratorFarm::LdbcRandomGeneratorFarm()
@@ -287,7 +294,20 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 			companies[company] = work_from;
 		}
 	}
-	auto languages = dictionaries.languages.GetLanguageList(random_farm.Get(LdbcRandomAspect::LANGUAGE), country_id);
+	auto &language_random = random_farm.Get(LdbcRandomAspect::LANGUAGE);
+	auto language_ids = dictionaries.languages.GetLanguages(language_random, country_id);
+	auto international_language = dictionaries.languages.GetInternationalLanguage(language_random);
+	if (international_language != -1 &&
+	    std::find(language_ids.begin(), language_ids.end(), international_language) == language_ids.end()) {
+		language_ids.push_back(international_language);
+	}
+	string languages;
+	for (idx_t language_idx = 0; language_idx < language_ids.size(); language_idx++) {
+		if (language_idx > 0) {
+			languages += ";";
+		}
+		languages += dictionaries.languages.GetLanguageName(language_ids[language_idx]);
+	}
 
 	LdbcPersonCore result;
 	result.sequential_id = sequential_id;
@@ -313,6 +333,7 @@ LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
 	result.explicitly_deleted = explicitly_deleted;
 	result.large_poster = Date::ExtractMonth(LdbcDateFromEpochMs(birthday)) == 1;
 	result.random_id = random_id;
+	result.language_ids = std::move(language_ids);
 	result.interests = std::move(interests);
 	result.university_location_id = university_location_id;
 	result.university_id = university_id;
@@ -502,6 +523,319 @@ vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const v
 		}
 	}
 	return merged_edges;
+}
+
+namespace {
+
+struct LdbcActivityFriend {
+	const LdbcPersonCore *person;
+	int64_t creation_date;
+	int64_t deletion_date;
+};
+
+static int64_t NumberOfMonths(const LdbcDateGenerator &dates, int64_t from_date) {
+	return (dates.SimulationEnd() - from_date) / (30LL * LdbcDateGenerator::ONE_DAY_MS);
+}
+
+static int64_t FormActivityId(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates, int64_t local_id,
+                              int64_t creation_date, int64_t block_id) {
+	const uint64_t id_mask = ~(0xFFFFFFFFFFFFFFFFULL << 36U);
+	auto bucket = static_cast<int64_t>(256.0 * static_cast<double>(creation_date - dates.SimulationStart()) /
+	                                   static_cast<double>(dates.SimulationEnd()));
+	auto composed = (bucket << 36U) | static_cast<int64_t>(static_cast<uint64_t>(local_id) & id_mask);
+	auto blocks = static_cast<int64_t>(
+	    std::ceil(static_cast<double>(config.num_persons) / static_cast<double>(config.block_size)));
+	auto num_bits = blocks <= 1 ? int64_t(0) : static_cast<int64_t>(std::ceil(std::log2(static_cast<double>(blocks))));
+	if (num_bits > 20) {
+		throw InvalidInputException("LDBC activity id block bits exceed Spark-compatible range");
+	}
+	auto lower_part = composed & 0x0FFFFFLL;
+	auto machine_part = block_id << 20U;
+	auto upper_part = (composed >> 20U) << (20U + NumericCast<uint32_t>(num_bits));
+	return upper_part | machine_part | lower_part;
+}
+
+static int32_t RandomPersonLanguage(LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person) {
+	if (person.language_ids.empty()) {
+		return -1;
+	}
+	auto language_idx = random_farm.Get(LdbcRandomAspect::LANGUAGE).NextInt(NumericCast<int32_t>(person.language_ids.size()));
+	return person.language_ids[language_idx];
+}
+
+static int32_t RandomPersonInterest(LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person) {
+	if (person.interests.empty()) {
+		return -1;
+	}
+	auto interest_idx = random_farm.Get(LdbcRandomAspect::FORUM_INTEREST).NextInt(NumericCast<int32_t>(person.interests.size()));
+	return person.interests[interest_idx];
+}
+
+static string EscapedTagName(const LdbcPersonDictionaries &dictionaries, int32_t tag_id) {
+	auto name = dictionaries.tags.GetName(tag_id);
+	string result;
+	for (auto c : name) {
+		if (c == '"') {
+			result += "\\\"";
+		} else {
+			result += c;
+		}
+	}
+	return result;
+}
+
+static LdbcForum CreateWallForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
+                                 LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
+                                 const vector<LdbcActivityFriend> &friends, int64_t local_forum_id, int64_t block_id) {
+	LdbcForum forum;
+	forum.creation_date = person.creation_date + config.delta;
+	forum.deletion_date = person.deletion_date;
+	forum.explicitly_deleted = false;
+	forum.id = FormActivityId(config, dates, local_forum_id, forum.creation_date, block_id);
+	forum.title = ClampStringLocal("Wall of " + person.first_name + " " + person.last_name, 256);
+	forum.moderator_person_id = person.account_id;
+	forum.tags = person.interests;
+	RandomPersonLanguage(random_farm, person);
+
+	for (auto &friend_entry : friends) {
+		auto membership_creation_date = friend_entry.creation_date + config.delta;
+		auto membership_deletion_date = std::min(forum.deletion_date, friend_entry.deletion_date);
+		if (membership_deletion_date - membership_creation_date < 0) {
+			continue;
+		}
+		forum.memberships.push_back({membership_creation_date, membership_deletion_date, false, forum.id,
+		                             friend_entry.person->account_id});
+	}
+	return forum;
+}
+
+static bool CreateGroupForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
+                             const LdbcPersonDictionaries &dictionaries, LdbcRandomGeneratorFarm &random_farm,
+                             const LdbcPersonCore &moderator, const vector<const LdbcPersonCore *> &block,
+                             const vector<LdbcActivityFriend> &friends, int64_t local_forum_id, int64_t block_id,
+                             LdbcForum &forum) {
+	auto min_creation = moderator.creation_date + config.delta;
+	auto max_creation = std::min(moderator.deletion_date, dates.SimulationEnd());
+	if (max_creation <= min_creation) {
+		return false;
+	}
+	auto creation_date = dates.RandomDate(random_farm.Get(LdbcRandomAspect::DATE), min_creation, max_creation);
+	bool explicitly_deleted = random_farm.Get(LdbcRandomAspect::DELETION_FORUM).NextDouble() < config.prob_forum_deleted;
+	int64_t deletion_date;
+	if (explicitly_deleted) {
+		auto min_deletion = creation_date + config.delta;
+		auto max_deletion = dates.SimulationEnd();
+		if (max_deletion <= min_deletion) {
+			return false;
+		}
+		deletion_date = dates.RandomDate(random_farm.Get(LdbcRandomAspect::DATE), min_deletion, max_deletion);
+	} else {
+		deletion_date = dates.NetworkCollapse();
+	}
+	auto interest_id = RandomPersonInterest(random_farm, moderator);
+	if (interest_id == -1) {
+		return false;
+	}
+	RandomPersonLanguage(random_farm, moderator);
+
+	forum.creation_date = creation_date;
+	forum.deletion_date = deletion_date;
+	forum.explicitly_deleted = explicitly_deleted;
+	forum.id = FormActivityId(config, dates, local_forum_id, creation_date, block_id);
+	forum.title = ClampStringLocal("Group for " + EscapedTagName(dictionaries, interest_id) + " in " +
+	                                   dictionaries.places.GetPlaceName(moderator.city_id),
+	                               256);
+	forum.moderator_person_id = moderator.account_id;
+	forum.tags = {interest_id};
+
+	std::set<int64_t> group_members;
+	auto group_size = random_farm.Get(LdbcRandomAspect::NUM_USERS_PER_FORUM).NextInt(config.max_group_size);
+	int32_t num_loop = 0;
+	while (NumericCast<int32_t>(forum.memberships.size()) < group_size && num_loop < config.block_size) {
+		auto friend_probability = random_farm.Get(LdbcRandomAspect::KNOWS_LEVEL).NextDouble();
+		const LdbcPersonCore *member = nullptr;
+		int64_t member_creation_floor = creation_date;
+		int64_t member_deletion_ceil = deletion_date;
+		if (friend_probability < 0.3 && !friends.empty()) {
+			auto friend_idx = random_farm.Get(LdbcRandomAspect::MEMBERSHIP_INDEX).NextInt(NumericCast<int32_t>(friends.size()));
+			auto &friend_entry = friends[friend_idx];
+			member = friend_entry.person;
+		} else if (!block.empty()) {
+			auto candidate_idx = random_farm.Get(LdbcRandomAspect::MEMBERSHIP_INDEX).NextInt(NumericCast<int32_t>(block.size()));
+			member = block[candidate_idx];
+			if (random_farm.Get(LdbcRandomAspect::MEMBERSHIP).NextDouble() >= 0.1) {
+				num_loop++;
+				continue;
+			}
+		}
+		if (!member || group_members.find(member->account_id) != group_members.end()) {
+			num_loop++;
+			continue;
+		}
+		auto min_member_creation = std::max(member_creation_floor, member->creation_date) + config.delta;
+		auto max_member_creation = std::min(std::min(member_deletion_ceil, member->deletion_date), dates.SimulationEnd());
+		if (max_member_creation <= min_member_creation) {
+			num_loop++;
+			continue;
+		}
+		auto &membership_random = random_farm.Get(LdbcRandomAspect::MEMBERSHIP_INDEX);
+		auto membership_creation = dates.RandomDate(membership_random, min_member_creation, max_member_creation);
+		bool membership_deleted = random_farm.Get(LdbcRandomAspect::DELETION_MEMB).NextDouble() < config.prob_memb_deleted;
+		int64_t membership_deletion;
+		if (membership_deleted) {
+			auto min_member_deletion = membership_creation + config.delta;
+			auto max_member_deletion = std::min(std::min(member->deletion_date, deletion_date), dates.SimulationEnd());
+			if (max_member_deletion <= min_member_deletion) {
+				num_loop++;
+				continue;
+			}
+			membership_deletion = dates.RandomDate(membership_random, min_member_deletion, max_member_deletion);
+		} else {
+			membership_deletion = std::min(member->deletion_date, deletion_date);
+		}
+		forum.memberships.push_back(
+		    {membership_creation, membership_deletion, membership_deleted, forum.id, member->account_id});
+		group_members.insert(member->account_id);
+		num_loop++;
+	}
+	return true;
+}
+
+static bool CreateAlbumForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
+                             const LdbcPersonDictionaries &dictionaries,
+                             LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
+                             const vector<LdbcActivityFriend> &friends, int64_t local_forum_id, int32_t album_number,
+                             int64_t block_id, LdbcForum &forum) {
+	auto min_creation = person.creation_date + config.delta;
+	auto max_creation = std::min(person.deletion_date, dates.SimulationEnd());
+	if (max_creation <= min_creation) {
+		return false;
+	}
+	auto creation_date = dates.RandomDate(random_farm.Get(LdbcRandomAspect::DATE), min_creation, max_creation);
+	bool explicitly_deleted = random_farm.Get(LdbcRandomAspect::DELETION_FORUM).NextDouble() < config.prob_forum_deleted;
+	int64_t deletion_date;
+	if (explicitly_deleted) {
+		auto min_deletion = creation_date + config.delta;
+		auto max_deletion = std::min(person.deletion_date, dates.SimulationEnd());
+		if (max_deletion - min_creation < 0 || max_deletion <= min_deletion) {
+			return false;
+		}
+		deletion_date = dates.RandomDate(random_farm.Get(LdbcRandomAspect::DATE), min_deletion, max_deletion);
+	} else {
+		deletion_date = person.deletion_date;
+	}
+	auto interest_id = RandomPersonInterest(random_farm, person);
+	if (interest_id == -1) {
+		return false;
+	}
+	RandomPersonLanguage(random_farm, person);
+	random_farm.Get(LdbcRandomAspect::COUNTRY).NextInt(NumericCast<int32_t>(dictionaries.places.GetCountries().size()));
+
+	forum.creation_date = creation_date;
+	forum.deletion_date = deletion_date;
+	forum.explicitly_deleted = explicitly_deleted;
+	forum.id = FormActivityId(config, dates, local_forum_id, creation_date, block_id);
+	forum.title =
+	    ClampStringLocal("Album " + std::to_string(album_number) + " of " + person.first_name + " " + person.last_name, 256);
+	forum.moderator_person_id = person.account_id;
+	forum.tags = {interest_id};
+
+	for (auto &friend_entry : friends) {
+		if (random_farm.Get(LdbcRandomAspect::ALBUM_MEMBERSHIP).NextDouble() >= 0.7) {
+			continue;
+		}
+		auto membership_creation = std::max(friend_entry.person->creation_date, creation_date) + config.delta;
+		auto membership_deletion = std::min(friend_entry.person->deletion_date, deletion_date);
+		if (membership_deletion - membership_creation > 0) {
+			forum.memberships.push_back(
+			    {membership_creation, membership_deletion, false, forum.id, friend_entry.person->account_id});
+		}
+	}
+	return true;
+}
+
+} // namespace
+
+vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
+                                     const vector<LdbcKnowsEdge> &knows_edges) {
+	LdbcDateGenerator dates(config);
+	LdbcPersonDictionaries dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang,
+	                                    config.tag_country_corr_prob, config.prob_uncorrelated_company,
+	                                    config.prob_uncorrelated_organisation, config.prob_top_univ);
+
+	unordered_map<int64_t, const LdbcPersonCore *> persons_by_id;
+	for (auto &person : persons) {
+		persons_by_id[person.account_id] = &person;
+	}
+	unordered_map<int64_t, vector<LdbcActivityFriend>> friends_by_person;
+	for (auto &edge : knows_edges) {
+		auto left = persons_by_id.find(edge.person1_id);
+		auto right = persons_by_id.find(edge.person2_id);
+		if (left == persons_by_id.end() || right == persons_by_id.end()) {
+			continue;
+		}
+		friends_by_person[edge.person1_id].push_back({right->second, edge.creation_date, edge.deletion_date});
+		friends_by_person[edge.person2_id].push_back({left->second, edge.creation_date, edge.deletion_date});
+	}
+	for (auto &entry : friends_by_person) {
+		std::sort(entry.second.begin(), entry.second.end(),
+		          [](const LdbcActivityFriend &left, const LdbcActivityFriend &right) {
+			          return left.person->account_id < right.person->account_id;
+		          });
+	}
+
+	vector<LdbcForum> forums;
+	for (int64_t block_start = 0; block_start < config.num_persons; block_start += config.block_size) {
+		auto block_end = std::min<int64_t>(config.num_persons, block_start + config.block_size);
+		auto block_id = block_start / config.block_size;
+		LdbcRandomGeneratorFarm random_farm;
+		random_farm.Reset(block_id);
+		int64_t local_forum_id = 0;
+
+		vector<const LdbcPersonCore *> block;
+		for (int64_t idx = block_start; idx < block_end; idx++) {
+			block.push_back(&persons[NumericCast<idx_t>(idx)]);
+		}
+
+		for (auto *person : block) {
+			auto &friends = friends_by_person[person->account_id];
+			if (person->deletion_date - person->creation_date + config.delta >= 0) {
+				forums.push_back(CreateWallForum(config, dates, random_farm, *person, friends, local_forum_id++, block_id));
+			} else {
+				local_forum_id++;
+			}
+
+			auto moderator_probability = random_farm.Get(LdbcRandomAspect::FORUM_MODERATOR).NextDouble();
+			auto group_count =
+			    random_farm.Get(LdbcRandomAspect::NUM_FORUM).NextInt(config.max_num_group_created_per_person) + 1;
+			for (int32_t group_idx = 0; group_idx < group_count; group_idx++) {
+				if (moderator_probability >= config.group_moderator_prob) {
+					continue;
+				}
+				LdbcForum forum;
+				if (CreateGroupForum(config, dates, dictionaries, random_farm, *person, block, friends, local_forum_id,
+				                     block_id, forum)) {
+					forums.push_back(std::move(forum));
+				}
+				local_forum_id++;
+			}
+
+			auto month_count = NumericCast<int32_t>(NumberOfMonths(dates, person->creation_date));
+			auto album_per_month =
+			    random_farm.Get(LdbcRandomAspect::NUM_PHOTO_ALBUM).NextInt(config.max_num_photo_albums_per_month + 1);
+			auto album_count = album_per_month == 0 ? 0 : month_count * album_per_month;
+			for (int32_t album_idx = 0; album_idx < album_count; album_idx++) {
+				LdbcForum forum;
+				if (CreateAlbumForum(config, dates, dictionaries, random_farm, *person, friends, local_forum_id, album_idx,
+				                     block_id, forum)) {
+					forums.push_back(std::move(forum));
+				}
+				local_forum_id++;
+				random_farm.Get(LdbcRandomAspect::NUM_PHOTO).NextInt(config.max_num_photo_per_albums + 1);
+			}
+		}
+	}
+	return forums;
 }
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms) {
