@@ -1,10 +1,16 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "ldbc_data_gen_extension.hpp"
+#include "ldbc_datagen_config.hpp"
+#include "ldbc_gen.hpp"
 #include "ldbc_java_random.hpp"
+#include "ldbc_person_generator.hpp"
+#include "ldbc_unicode.hpp"
 #include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/vector_operations/unary_executor.hpp"
+#include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/client_data.hpp"
 #include "duckdb/main/database_manager.hpp"
@@ -19,8 +25,10 @@
 #include "duckdb/planner/binder.hpp"
 
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <unordered_map>
 
 namespace duckdb {
@@ -192,6 +200,34 @@ struct LdbcJavaRandomGlobalState : public GlobalTableFunctionState {
 	LdbcJavaRandom next_float;
 	LdbcJavaRandom next_int_100;
 	LdbcJavaRandom next_int_max;
+};
+
+struct LdbcGenConfigEntry {
+	const char *parameter;
+	string value;
+	const char *logical_type;
+	const char *source;
+};
+
+struct LdbcGenConfigBindData : public TableFunctionData {
+	vector<LdbcGenConfigEntry> entries;
+};
+
+struct LdbcGenConfigGlobalState : public GlobalTableFunctionState {
+	idx_t offset = 0;
+};
+
+struct LdbcGenPersonCoreBindData : public TableFunctionData {
+	LdbcDatagenConfig config;
+	idx_t rows = 10;
+};
+
+struct LdbcGenPersonCoreGlobalState : public GlobalTableFunctionState {
+	explicit LdbcGenPersonCoreGlobalState(const LdbcDatagenConfig &config) : generator(config) {
+	}
+
+	idx_t offset = 0;
+	LdbcPersonGenerator generator;
 };
 
 static string GetStringParameter(TableFunctionBindInput &input, const string &name, const string &default_value) {
@@ -714,6 +750,41 @@ static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context
 	return PopulateStaticTables(context, bind_data);
 }
 
+namespace ldbc {
+
+void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite) {
+	CreateSchemaIfNeeded(context, catalog, schema);
+
+	idx_t relation_start = 0;
+	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
+		if (row_idx == LdbcSchemaSize() ||
+		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx, catalog,
+			                schema, overwrite);
+			relation_start = row_idx;
+		}
+	}
+}
+
+unordered_map<string, idx_t> LDBCGenWrapper::LoadLDBCData(ClientContext &context, string catalog, string schema,
+                                                          string dictionary_dir) {
+	LdbcGenBindData bind_data;
+	bind_data.catalog = std::move(catalog);
+	bind_data.schema = std::move(schema);
+	bind_data.dictionary_dir = std::move(dictionary_dir);
+	return PopulateStaticTables(context, bind_data);
+}
+
+idx_t LDBCGenWrapper::RelationCount() {
+	return LdbcRelationCount();
+}
+
+string LDBCGenWrapper::RelationName(idx_t relation_index) {
+	return LdbcRelationAt(relation_index).relation_name;
+}
+
+} // namespace ldbc
+
 static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctionBindInput &input,
                                             vector<LogicalType> &return_types, vector<string> &names) {
 	if (!input.inputs.empty()) {
@@ -781,11 +852,13 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
 
 	if (bind_data.target == "tables" && !state.materialized) {
-		state.row_counts = MaterializeLdbcTables(context, bind_data);
+		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite);
+		state.row_counts =
+		    ldbc::LDBCGenWrapper::LoadLDBCData(context, bind_data.catalog, bind_data.schema, bind_data.dictionary_dir);
 		state.materialized = true;
 	}
 
-	if (state.offset >= (bind_data.target == "tables" ? LdbcRelationCount() : 1)) {
+	if (state.offset >= (bind_data.target == "tables" ? ldbc::LDBCGenWrapper::RelationCount() : 1)) {
 		return;
 	}
 
@@ -800,11 +873,11 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		count = 1;
 		state.offset = 1;
 	} else {
-		while (state.offset < LdbcRelationCount() && count < STANDARD_VECTOR_SIZE) {
-			auto &relation = LdbcRelationAt(state.offset);
-			output.data[0].SetValue(count, relation.relation_name);
-			output.data[1].SetValue(count, bind_data.catalog + "." + bind_data.schema + "." + string(relation.relation_name));
-			auto row_count = state.row_counts.find(relation.relation_name);
+		while (state.offset < ldbc::LDBCGenWrapper::RelationCount() && count < STANDARD_VECTOR_SIZE) {
+			auto relation_name = ldbc::LDBCGenWrapper::RelationName(state.offset);
+			output.data[0].SetValue(count, relation_name);
+			output.data[1].SetValue(count, bind_data.catalog + "." + bind_data.schema + "." + relation_name);
+			auto row_count = state.row_counts.find(relation_name);
 			output.data[2].SetValue(count, Value::BIGINT(row_count == state.row_counts.end() ? 0 : row_count->second));
 			output.data[3].SetValue(count, Value(LogicalType::VARCHAR));
 			output.data[4].SetValue(count, "table");
@@ -900,6 +973,204 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 	output.SetCardinality(count);
 }
 
+static string DoubleToConfigString(double value) {
+	std::ostringstream stream;
+	stream << std::setprecision(15) << value;
+	return stream.str();
+}
+
+static void AddConfigEntry(vector<LdbcGenConfigEntry> &entries, const char *parameter, string value,
+                           const char *logical_type, const char *source) {
+	entries.push_back({parameter, std::move(value), logical_type, source});
+}
+
+static vector<LdbcGenConfigEntry> BuildConfigEntries(const LdbcDatagenConfig &config) {
+	vector<LdbcGenConfigEntry> entries;
+	AddConfigEntry(entries, "scale_factor", config.scale_factor_name, "VARCHAR", "scale_factors.xml");
+	AddConfigEntry(entries, "resource_dir", config.resource_dir, "VARCHAR", "argument");
+	AddConfigEntry(entries, "num_persons", std::to_string(config.num_persons), "BIGINT", "scale_factors.xml");
+	AddConfigEntry(entries, "block_size", std::to_string(config.block_size), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "start_year", std::to_string(config.start_year), "INTEGER", "scale_factors.xml");
+	AddConfigEntry(entries, "num_years", std::to_string(config.num_years), "INTEGER", "scale_factors.xml");
+	AddConfigEntry(entries, "delta", std::to_string(config.delta), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "degree_distribution", config.degree_distribution, "VARCHAR", "scale_factors.xml");
+	AddConfigEntry(entries, "knows_generator", config.knows_generator, "VARCHAR", "params_default.ini");
+	AddConfigEntry(entries, "person_similarity", config.person_similarity, "VARCHAR", "params_default.ini");
+	AddConfigEntry(entries, "max_num_friends", std::to_string(config.max_num_friends), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "min_num_tags_per_person", std::to_string(config.min_num_tags_per_person), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_num_tags_per_person", std::to_string(config.max_num_tags_per_person), "INTEGER",
+	               "params_default.ini");
+	AddConfigEntry(entries, "max_emails", std::to_string(config.max_emails), "INTEGER", "params_default.ini");
+	AddConfigEntry(entries, "max_companies", std::to_string(config.max_companies), "INTEGER",
+	               "params_default.ini:generator.maxEmails");
+	AddConfigEntry(entries, "prob_english", DoubleToConfigString(config.prob_english), "DOUBLE",
+	               "params_default.ini:generator.maxEmails");
+	AddConfigEntry(entries, "prob_second_lang", DoubleToConfigString(config.prob_second_lang), "DOUBLE",
+	               "params_default.ini:generator.maxEmails");
+	AddConfigEntry(entries, "missing_ratio", DoubleToConfigString(config.missing_ratio), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_another_browser", DoubleToConfigString(config.prob_another_browser), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_uncorrelated_company", DoubleToConfigString(config.prob_uncorrelated_company), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "prob_uncorrelated_organisation", DoubleToConfigString(config.prob_uncorrelated_organisation),
+	               "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "prob_top_univ", DoubleToConfigString(config.prob_top_univ), "DOUBLE", "params_default.ini");
+	AddConfigEntry(entries, "tag_country_corr_prob", DoubleToConfigString(config.tag_country_corr_prob), "DOUBLE",
+	               "params_default.ini");
+	AddConfigEntry(entries, "alpha", DoubleToConfigString(LdbcDatagenConfig::ALPHA), "DOUBLE", "DatagenParams.java");
+	AddConfigEntry(entries, "bulkload_portion", DoubleToConfigString(config.bulkload_portion), "DOUBLE",
+	               "LdbcDatagen.scala");
+	return entries;
+}
+
+static unique_ptr<FunctionData> LdbcGenConfigBind(ClientContext &context, TableFunctionBindInput &input,
+                                                  vector<LogicalType> &return_types, vector<string> &names) {
+	if (!input.inputs.empty()) {
+		throw BinderException("ldbcgen_config only accepts named parameters");
+	}
+
+	auto result = make_uniq<LdbcGenConfigBindData>();
+	auto scale_factor = GetDoubleParameter(input, "sf", 1.0);
+	if (scale_factor <= 0) {
+		throw BinderException("ldbcgen_config parameter sf must be greater than zero");
+	}
+	auto resource_dir = GetStringParameter(input, "resource_dir", LdbcDatagenConfig::DEFAULT_RESOURCE_DIR);
+	result->entries = BuildConfigEntries(LdbcDatagenConfig::Load(scale_factor, resource_dir));
+
+	names.emplace_back("parameter");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("value");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("logical_type");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("source");
+	return_types.emplace_back(LogicalType::VARCHAR);
+
+	return std::move(result);
+}
+
+static unique_ptr<GlobalTableFunctionState> LdbcGenConfigInit(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<LdbcGenConfigGlobalState>();
+}
+
+static void LdbcGenConfigFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->Cast<LdbcGenConfigBindData>();
+	auto &state = data_p.global_state->Cast<LdbcGenConfigGlobalState>();
+	idx_t count = 0;
+
+	while (state.offset < bind_data.entries.size() && count < STANDARD_VECTOR_SIZE) {
+		auto &entry = bind_data.entries[state.offset];
+		output.data[0].SetValue(count, entry.parameter);
+		output.data[1].SetValue(count, entry.value);
+		output.data[2].SetValue(count, entry.logical_type);
+		output.data[3].SetValue(count, entry.source);
+		state.offset++;
+		count++;
+	}
+
+	output.SetCardinality(count);
+}
+
+static unique_ptr<FunctionData> LdbcGenPersonCoreBind(ClientContext &context, TableFunctionBindInput &input,
+                                                      vector<LogicalType> &return_types, vector<string> &names) {
+	if (!input.inputs.empty()) {
+		throw BinderException("ldbcgen_person_core only accepts named parameters");
+	}
+
+	auto scale_factor = GetDoubleParameter(input, "sf", 1.0);
+	if (scale_factor <= 0) {
+		throw BinderException("ldbcgen_person_core parameter sf must be greater than zero");
+	}
+
+	auto result = make_uniq<LdbcGenPersonCoreBindData>();
+	auto resource_dir = GetStringParameter(input, "resource_dir", LdbcDatagenConfig::DEFAULT_RESOURCE_DIR);
+	result->config = LdbcDatagenConfig::Load(scale_factor, resource_dir);
+	auto rows = GetBigIntParameter(input, "rows", 10);
+	if (rows < 0) {
+		throw BinderException("ldbcgen_person_core parameter rows must be non-negative");
+	}
+	result->rows = NumericCast<idx_t>(std::min<int64_t>(rows, result->config.num_persons));
+
+	names.emplace_back("sequential_id");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("block_id");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("block_offset");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("creation_date_ms");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("creationDate");
+	return_types.emplace_back(LogicalType::TIMESTAMP_MS);
+	names.emplace_back("id");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("birthday_ms");
+	return_types.emplace_back(LogicalType::BIGINT);
+	names.emplace_back("birthday");
+	return_types.emplace_back(LogicalType::DATE);
+	names.emplace_back("gender_code");
+	return_types.emplace_back(LogicalType::TINYINT);
+	names.emplace_back("country_id");
+	return_types.emplace_back(LogicalType::INTEGER);
+	names.emplace_back("city_id");
+	return_types.emplace_back(LogicalType::INTEGER);
+	names.emplace_back("browser_id");
+	return_types.emplace_back(LogicalType::INTEGER);
+	names.emplace_back("browser");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("ip_address");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("language");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("first_name");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("last_name");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("message_deleter");
+	return_types.emplace_back(LogicalType::BOOLEAN);
+	names.emplace_back("random_id");
+	return_types.emplace_back(LogicalType::BIGINT);
+
+	return std::move(result);
+}
+
+static unique_ptr<GlobalTableFunctionState> LdbcGenPersonCoreInit(ClientContext &context, TableFunctionInitInput &input) {
+	auto &bind_data = input.bind_data->Cast<LdbcGenPersonCoreBindData>();
+	return make_uniq<LdbcGenPersonCoreGlobalState>(bind_data.config);
+}
+
+static void LdbcGenPersonCoreFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->Cast<LdbcGenPersonCoreBindData>();
+	auto &state = data_p.global_state->Cast<LdbcGenPersonCoreGlobalState>();
+
+	idx_t count = 0;
+	while (state.offset < bind_data.rows && count < STANDARD_VECTOR_SIZE) {
+		auto person = state.generator.GenerateCore(NumericCast<int64_t>(state.offset));
+		output.data[0].SetValue(count, Value::BIGINT(person.sequential_id));
+		output.data[1].SetValue(count, Value::BIGINT(person.block_id));
+		output.data[2].SetValue(count, Value::BIGINT(person.block_offset));
+		output.data[3].SetValue(count, Value::BIGINT(person.creation_date));
+		output.data[4].SetValue(count, Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+		output.data[5].SetValue(count, Value::BIGINT(person.account_id));
+		output.data[6].SetValue(count, Value::BIGINT(person.birthday));
+		output.data[7].SetValue(count, Value::DATE(LdbcDateFromEpochMs(person.birthday)));
+		output.data[8].SetValue(count, Value::TINYINT(person.gender));
+		output.data[9].SetValue(count, Value::INTEGER(person.country_id));
+		output.data[10].SetValue(count, Value::INTEGER(person.city_id));
+		output.data[11].SetValue(count, Value::INTEGER(person.browser_id));
+		output.data[12].SetValue(count, person.browser_name);
+		output.data[13].SetValue(count, person.ip_address);
+		output.data[14].SetValue(count, person.languages);
+		output.data[15].SetValue(count, person.first_name);
+		output.data[16].SetValue(count, person.last_name);
+		output.data[17].SetValue(count, Value::BOOLEAN(person.message_deleter));
+		output.data[18].SetValue(count, Value::BIGINT(person.random_id));
+		count++;
+		state.offset++;
+	}
+	output.SetCardinality(count);
+}
+
 static unique_ptr<FunctionData> LdbcJavaRandomBind(ClientContext &context, TableFunctionBindInput &input,
                                                    vector<LogicalType> &return_types, vector<string> &names) {
 	if (!input.inputs.empty()) {
@@ -954,6 +1225,13 @@ static void LdbcJavaRandomFunction(ClientContext &context, TableFunctionInput &d
 	output.SetCardinality(count);
 }
 
+static void LdbcEmailBaseFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &input = args.data[0];
+	UnaryExecutor::Execute<string_t, string_t>(input, result, args.size(), [&](string_t value) {
+		return StringVector::AddString(result, LdbcEmailBaseFromFirstName(value.GetString()));
+	});
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen("ldbcgen", {}, LdbcGenFunction, LdbcGenBind, LdbcGenInit);
 	ldbcgen.named_parameters["sf"] = LogicalType::DOUBLE;
@@ -970,10 +1248,25 @@ static void LoadInternal(ExtensionLoader &loader) {
 	ldbcgen_schema.named_parameters["format"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(ldbcgen_schema);
 
+	TableFunction ldbcgen_config("ldbcgen_config", {}, LdbcGenConfigFunction, LdbcGenConfigBind, LdbcGenConfigInit);
+	ldbcgen_config.named_parameters["sf"] = LogicalType::DOUBLE;
+	ldbcgen_config.named_parameters["resource_dir"] = LogicalType::VARCHAR;
+	loader.RegisterFunction(ldbcgen_config);
+
+	TableFunction ldbcgen_person_core("ldbcgen_person_core", {}, LdbcGenPersonCoreFunction, LdbcGenPersonCoreBind,
+	                                  LdbcGenPersonCoreInit);
+	ldbcgen_person_core.named_parameters["sf"] = LogicalType::DOUBLE;
+	ldbcgen_person_core.named_parameters["resource_dir"] = LogicalType::VARCHAR;
+	ldbcgen_person_core.named_parameters["rows"] = LogicalType::BIGINT;
+	loader.RegisterFunction(ldbcgen_person_core);
+
 	TableFunction java_random("ldbc_java_random", {}, LdbcJavaRandomFunction, LdbcJavaRandomBind, LdbcJavaRandomInit);
 	java_random.named_parameters["seed"] = LogicalType::BIGINT;
 	java_random.named_parameters["rows"] = LogicalType::BIGINT;
 	loader.RegisterFunction(java_random);
+
+	ScalarFunction email_base("ldbc_email_base", {LogicalType::VARCHAR}, LogicalType::VARCHAR, LdbcEmailBaseFunction);
+	loader.RegisterFunction(email_base);
 }
 
 void LdbcDataGenExtension::Load(ExtensionLoader &loader) {

@@ -11,6 +11,48 @@ Catalog Error: Table Function with name ldbcgen does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
+# Spark-derived datagen configuration is resolved from pinned params_default.ini
+# plus scale_factors.xml.
+query TTTT
+SELECT parameter, value, logical_type, source
+FROM ldbcgen_config(sf := 0.003)
+WHERE parameter IN ('scale_factor', 'num_persons', 'block_size', 'start_year', 'num_years', 'degree_distribution')
+ORDER BY parameter;
+----
+block_size	10000	INTEGER	params_default.ini
+degree_distribution	Facebook	VARCHAR	scale_factors.xml
+num_persons	50	BIGINT	scale_factors.xml
+num_years	3	INTEGER	scale_factors.xml
+scale_factor	0.003	VARCHAR	scale_factors.xml
+start_year	2010	INTEGER	scale_factors.xml
+
+query TTT
+SELECT parameter, value, source
+FROM ldbcgen_config(sf := 1)
+WHERE parameter IN ('num_persons', 'bulkload_portion', 'alpha')
+ORDER BY parameter;
+----
+alpha	0.4	DatagenParams.java
+bulkload_portion	0.97	LdbcDatagen.scala
+num_persons	10620	scale_factors.xml
+
+query TTT
+SELECT parameter, value, source
+FROM ldbcgen_config(sf := 1)
+WHERE parameter IN ('max_emails', 'max_companies', 'prob_english', 'prob_second_lang')
+ORDER BY parameter;
+----
+max_companies	5	params_default.ini:generator.maxEmails
+max_emails	5	params_default.ini
+prob_english	5	params_default.ini:generator.maxEmails
+prob_second_lang	5	params_default.ini:generator.maxEmails
+
+statement error
+SELECT *
+FROM ldbcgen_config(sf := 2);
+----
+Invalid Input Error: Scale factor '2' does not exist
+
 # Java-compatible RNG vectors used by the Spark generator parity path.
 query I
 SELECT next_long
@@ -88,6 +130,64 @@ SELECT *
 FROM ldbc_java_random(rows := -1);
 ----
 Binder Error: ldbc_java_random parameter rows must be non-negative
+
+# Java email-base normalization uses ICU NFD plus removal of the
+# U+0300..U+036F Combining Diacritical Marks block, then Spark's dot cleanup.
+query TT
+SELECT name, ldbc_email_base(name) AS email_base
+FROM (VALUES
+  ('Renée'),
+  ('José María'),
+  ('Björk Guðmundsdóttir'),
+  ('A  B...C'),
+  ('Łukasz')
+) AS input(name);
+----
+Renée	Renee
+José María	Jose.Maria
+Björk Guðmundsdóttir	Bjork.Guðmundsdottir
+A  B...C	A.B.C
+Łukasz	Łukasz
+
+# Spark-compatible Person core generation covers block scheduling, RNG farm seeding,
+# creation dates, birthdays, gender draws, random ids, and account-id composition.
+query IIIIIIII
+SELECT sequential_id, block_id, block_offset, creation_date_ms, id, birthday_ms, gender_code, random_id
+FROM ldbcgen_person_core(sf := 0.003, rows := 5)
+ORDER BY sequential_id;
+----
+0	0	0	1311716494142	19791209299968	478051200000	1	87
+1	0	1	1324386401774	24189255811073	536803200000	1	30
+2	0	2	1313169520264	19791209299970	626745600000	0	49
+3	0	3	1262322619506	3	366076800000	1	58
+4	0	4	1342151307995	32985348833284	486518400000	1	16
+
+query IIIII
+SELECT sequential_id, block_id, block_offset, creation_date_ms, id
+FROM ldbcgen_person_core(sf := 1, rows := 10005)
+WHERE sequential_id IN (9999, 10000, 10001)
+ORDER BY sequential_id;
+----
+9999	0	9999	1315762472659	21990232565519
+10000	1	0	1281244244465	6597069776656
+10001	1	1	1309251967219	17592186054417
+
+query IIIITTTTT
+SELECT sequential_id, country_id, city_id, browser_id, browser, ip_address, language, first_name, last_name
+FROM ldbcgen_person_core(sf := 0.003, rows := 5)
+ORDER BY sequential_id;
+----
+0	0	285	1	Internet Explorer	27.4.90.237	ml;gu;en	John	Kapoor
+1	78	1147	1	Internet Explorer	91.223.132.248	fr;en	Kostas	Antoniou
+2	51	642	0	Chrome	58.145.168.54	en;jv	Aryo	Ali
+3	56	866	1	Internet Explorer	31.185.10.92	ru;en	Dmitry	Garlitsky
+4	48	554	1	Internet Explorer	31.170.121.115	en;cy	John	Williams
+
+statement error
+SELECT *
+FROM ldbcgen_person_core(rows := -1);
+----
+Binder Error: ldbcgen_person_core parameter rows must be non-negative
 
 # Confirm table generation returns static dictionary row counts.
 query TI

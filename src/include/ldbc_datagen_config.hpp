@@ -1,0 +1,44 @@
+#pragma once
+
+#include "duckdb/common/common.hpp"
+
+#include <unordered_map>
+
+namespace duckdb {
+
+struct LdbcDatagenConfig {
+	string scale_factor_name;
+	string resource_dir;
+	unordered_map<string, string> properties;
+
+	int64_t num_persons;
+	int32_t block_size;
+	int32_t start_year;
+	int32_t num_years;
+	int32_t delta;
+	string degree_distribution;
+	string knows_generator;
+	string person_similarity;
+	int32_t max_num_friends;
+	int32_t min_num_tags_per_person;
+	int32_t max_num_tags_per_person;
+	int32_t max_emails;
+	int32_t max_companies;
+	double prob_english;
+	double prob_second_lang;
+	double missing_ratio;
+	double prob_another_browser;
+	double prob_uncorrelated_company;
+	double prob_uncorrelated_organisation;
+	double prob_top_univ;
+	double tag_country_corr_prob;
+	double bulkload_portion = 0.97;
+
+	static constexpr const char *DEFAULT_RESOURCE_DIR =
+	    "third_party/ldbc_snb_datagen_spark/src/main/resources";
+	static constexpr double ALPHA = 0.4;
+
+	static LdbcDatagenConfig Load(double scale_factor, const string &resource_dir = DEFAULT_RESOURCE_DIR);
+};
+
+} // namespace duckdb

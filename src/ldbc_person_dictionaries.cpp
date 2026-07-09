@@ -1,0 +1,499 @@
+#include "ldbc_person_dictionaries.hpp"
+
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <sstream>
+
+namespace duckdb {
+
+namespace {
+
+static string StripCarriageReturnLocal(string value) {
+	if (!value.empty() && value.back() == '\r') {
+		value.pop_back();
+	}
+	return value;
+}
+
+static vector<string> SplitWhitespaceLocal(const string &line) {
+	vector<string> result;
+	string current;
+	for (auto c : line) {
+		if (StringUtil::CharacterIsSpace(c)) {
+			if (!current.empty()) {
+				result.push_back(current);
+				current.clear();
+			}
+		} else {
+			current += c;
+		}
+	}
+	if (!current.empty()) {
+		result.push_back(current);
+	}
+	return result;
+}
+
+static string TrimWhitespaceLocal(const string &value) {
+	idx_t start = 0;
+	while (start < value.size() && StringUtil::CharacterIsSpace(value[start])) {
+		start++;
+	}
+	idx_t end = value.size();
+	while (end > start && StringUtil::CharacterIsSpace(value[end - 1])) {
+		end--;
+	}
+	return value.substr(start, end - start);
+}
+
+static std::ifstream OpenDictionaryPath(const string &dictionary_dir, const string &file_name) {
+	auto path = LdbcResourcePath(dictionary_dir, file_name);
+	std::ifstream file(path);
+	if (!file.is_open()) {
+		throw IOException("Could not open LDBC dictionary file '%s'", path);
+	}
+	return file;
+}
+
+} // namespace
+
+string LdbcResourcePath(const string &base, const string &path) {
+	if (base.empty()) {
+		throw InvalidInputException("LDBC resource path base must not be empty");
+	}
+	if (base.back() == '/') {
+		return base + path;
+	}
+	return base + "/" + path;
+}
+
+LdbcBrowserDictionary::LdbcBrowserDictionary(const string &dictionary_dir) {
+	auto file = OpenDictionaryPath(dictionary_dir, "browsersDic.txt");
+	string line;
+	double cumulative = 0.0;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto separator = line.find("  ");
+		if (separator == string::npos) {
+			throw InvalidInputException("Malformed browsersDic.txt line: '%s'", line);
+		}
+		auto browser = TrimWhitespaceLocal(line.substr(0, separator));
+		auto probability = TrimWhitespaceLocal(line.substr(separator + 2));
+		cumulative += std::stod(probability);
+		browsers.push_back(browser);
+		cumulative_distribution.push_back(cumulative);
+	}
+}
+
+int32_t LdbcBrowserDictionary::GetRandomBrowserId(LdbcJavaRandom &random) const {
+	auto probability = random.NextDouble();
+	auto position = std::lower_bound(cumulative_distribution.begin(), cumulative_distribution.end(), probability);
+	if (position == cumulative_distribution.end()) {
+		return NumericCast<int32_t>(cumulative_distribution.size() - 1);
+	}
+	return NumericCast<int32_t>(position - cumulative_distribution.begin());
+}
+
+const string &LdbcBrowserDictionary::GetName(int32_t id) const {
+	if (id < 0 || static_cast<idx_t>(id) >= browsers.size()) {
+		throw InternalException("LDBC browser id out of range");
+	}
+	return browsers[id];
+}
+
+LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
+	auto locations = OpenDictionaryPath(dictionary_dir, "dicLocations.txt");
+	string line;
+	while (std::getline(locations, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.size() < 6) {
+			throw InvalidInputException("Malformed dicLocations.txt line: '%s'", line);
+		}
+		auto country_id = NumericCast<int32_t>(countries.size());
+		country_names[columns[1]] = country_id;
+		country_names_by_id.push_back(columns[1]);
+		countries.push_back(country_id);
+		cities_by_country[country_id] = vector<int32_t>();
+		cumulative_distribution.push_back(std::stof(columns[5]));
+	}
+
+	auto cities = OpenDictionaryPath(dictionary_dir, "citiesByCountry.txt");
+	int32_t next_place_id = NumericCast<int32_t>(countries.size());
+	unordered_map<string, int32_t> city_names;
+	while (std::getline(cities, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed citiesByCountry.txt line: '%s'", line);
+		}
+		auto country = country_names.find(columns[0]);
+		if (country == country_names.end() || city_names.find(columns[1]) != city_names.end()) {
+			continue;
+		}
+		auto city_id = next_place_id++;
+		city_names[columns[1]] = city_id;
+		cities_by_country[country->second].push_back(city_id);
+	}
+}
+
+int32_t LdbcPlaceDictionary::GetCountryForPerson(LdbcJavaRandom &random) const {
+	auto probability = random.NextFloat();
+	auto position = std::lower_bound(cumulative_distribution.begin(), cumulative_distribution.end(), probability);
+	if (position == cumulative_distribution.end()) {
+		return NumericCast<int32_t>(cumulative_distribution.size() - 1);
+	}
+	return NumericCast<int32_t>(position - cumulative_distribution.begin());
+}
+
+int32_t LdbcPlaceDictionary::GetRandomCity(LdbcJavaRandom &random, int32_t country_id) const {
+	auto entry = cities_by_country.find(country_id);
+	if (entry == cities_by_country.end() || entry->second.empty()) {
+		return -1;
+	}
+	auto city_index = random.NextInt(NumericCast<int32_t>(entry->second.size()));
+	return entry->second[city_index];
+}
+
+const vector<int32_t> &LdbcPlaceDictionary::GetCountries() const {
+	return countries;
+}
+
+const string &LdbcPlaceDictionary::GetCountryName(int32_t country_id) const {
+	if (country_id < 0 || static_cast<idx_t>(country_id) >= country_names_by_id.size()) {
+		throw InternalException("LDBC country id out of range");
+	}
+	return country_names_by_id[country_id];
+}
+
+int32_t LdbcPlaceDictionary::GetCountryId(const string &country_name) const {
+	auto entry = country_names.find(country_name);
+	if (entry == country_names.end()) {
+		return -1;
+	}
+	return entry->second;
+}
+
+LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, const LdbcPlaceDictionary &places) {
+	unordered_map<string, string> country_abbreviations;
+	auto mapping = OpenDictionaryPath(LdbcResourcePath(resource_dir, "dictionaries"), "countryAbbrMapping.txt");
+	string line;
+	while (std::getline(mapping, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto separator = line.find("   ");
+		if (separator == string::npos) {
+			throw InvalidInputException("Malformed countryAbbrMapping.txt line: '%s'", line);
+		}
+		auto abbreviation = TrimWhitespaceLocal(line.substr(0, separator));
+		auto country = TrimWhitespaceLocal(line.substr(separator + 3));
+		std::replace(country.begin(), country.end(), ' ', '_');
+		country_abbreviations[country] = abbreviation;
+	}
+
+	for (auto country_id : places.GetCountries()) {
+		auto country_name = places.GetCountryName(country_id);
+		auto abbreviation = country_abbreviations.find(country_name);
+		if (abbreviation == country_abbreviations.end()) {
+			throw InvalidInputException("Missing IP country abbreviation for '%s'", country_name);
+		}
+
+		auto zone_path = LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
+		std::ifstream zone_file(zone_path);
+		if (!zone_file.is_open()) {
+			throw IOException("Could not open LDBC IP zone file '%s'", zone_path);
+		}
+
+		auto &networks = ips_by_country[country_id];
+		idx_t zone_count = 0;
+		while (zone_count < 100 && std::getline(zone_file, line)) {
+			line = StripCarriageReturnLocal(line);
+			if (line.empty()) {
+				continue;
+			}
+			std::replace(line.begin(), line.end(), '.', ' ');
+			std::replace(line.begin(), line.end(), '/', ' ');
+			std::stringstream parser(line);
+			uint32_t byte1;
+			uint32_t byte2;
+			uint32_t byte3;
+			uint32_t byte4;
+			uint32_t mask_bits;
+			parser >> byte1 >> byte2 >> byte3 >> byte4 >> mask_bits;
+			if (parser.fail() || mask_bits > 32) {
+				throw InvalidInputException("Malformed IP zone line in '%s': '%s'", zone_path, line);
+			}
+			auto ip = ((byte1 & 0xFFU) << 24U) | ((byte2 & 0xFFU) << 16U) | ((byte3 & 0xFFU) << 8U) |
+			          (byte4 & 0xFFU);
+			auto mask = mask_bits == 0 ? 0U : (0xFFFFFFFFU << (32U - mask_bits));
+			networks.push_back({ip & mask, mask});
+			zone_count++;
+		}
+	}
+}
+
+string LdbcIPAddressDictionary::GetIP(LdbcJavaRandom &random, int32_t country_id) const {
+	auto entry = ips_by_country.find(country_id);
+	if (entry == ips_by_country.end() || entry->second.empty()) {
+		throw InvalidInputException("No IP ranges loaded for LDBC country id %d", country_id);
+	}
+	auto network = entry->second[random.NextInt(NumericCast<int32_t>(entry->second.size()))];
+	auto random_bits = static_cast<uint32_t>(random.NextInt());
+	auto ip = network.network | ((~network.mask) & random_bits);
+	return std::to_string((ip >> 24U) & 0xFFU) + "." + std::to_string((ip >> 16U) & 0xFFU) + "." +
+	       std::to_string((ip >> 8U) & 0xFFU) + "." + std::to_string(ip & 0xFFU);
+}
+
+LdbcLanguageDictionary::LdbcLanguageDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places,
+                                               double prob_english, double prob_second_lang)
+    : prob_english(prob_english), prob_second_lang(prob_second_lang) {
+	for (auto country_id : places.GetCountries()) {
+		official_languages_by_country[country_id] = vector<int32_t>();
+		languages_by_country[country_id] = vector<int32_t>();
+	}
+
+	auto file = OpenDictionaryPath(dictionary_dir, "languagesByCountry.txt");
+	string line;
+	while (std::getline(file, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+
+		vector<string> columns;
+		idx_t offset = 0;
+		while (true) {
+			auto next = line.find("  ", offset);
+			if (next == string::npos) {
+				columns.push_back(TrimWhitespaceLocal(line.substr(offset)));
+				break;
+			}
+			columns.push_back(TrimWhitespaceLocal(line.substr(offset, next - offset)));
+			offset = next + 2;
+		}
+		if (columns.size() < 2) {
+			throw InvalidInputException("Malformed languagesByCountry.txt line: '%s'", line);
+		}
+		auto country_id = places.GetCountryId(columns[0]);
+		if (country_id == -1) {
+			continue;
+		}
+
+		for (idx_t column_idx = 1; column_idx < columns.size(); column_idx++) {
+			auto language_columns = SplitWhitespaceLocal(columns[column_idx]);
+			if (language_columns.empty()) {
+				continue;
+			}
+			auto language = language_columns[0];
+			auto language_id = NumericCast<int32_t>(std::find(languages.begin(), languages.end(), language) -
+			                                        languages.begin());
+			if (language_id == NumericCast<int32_t>(languages.size())) {
+				languages.push_back(language);
+			}
+			if (language_columns.size() == 3) {
+				official_languages_by_country[country_id].push_back(language_id);
+			}
+			languages_by_country[country_id].push_back(language_id);
+		}
+	}
+}
+
+vector<int32_t> LdbcLanguageDictionary::GetLanguages(LdbcJavaRandom &random, int32_t country_id) const {
+	vector<int32_t> result;
+	auto official = official_languages_by_country.find(country_id);
+	auto all = languages_by_country.find(country_id);
+	if (all == languages_by_country.end() || all->second.empty()) {
+		return result;
+	}
+	if (official != official_languages_by_country.end() && !official->second.empty()) {
+		result.push_back(official->second[random.NextInt(NumericCast<int32_t>(official->second.size()))]);
+	} else {
+		result.push_back(all->second[random.NextInt(NumericCast<int32_t>(all->second.size()))]);
+	}
+	if (random.NextDouble() < prob_second_lang) {
+		auto language_id = all->second[random.NextInt(NumericCast<int32_t>(all->second.size()))];
+		if (std::find(result.begin(), result.end(), language_id) == result.end()) {
+			result.push_back(language_id);
+		}
+	}
+	return result;
+}
+
+int32_t LdbcLanguageDictionary::GetInternationalLanguage(LdbcJavaRandom &random) const {
+	if (random.NextDouble() < prob_english) {
+		auto entry = std::find(languages.begin(), languages.end(), "en");
+		if (entry != languages.end()) {
+			return NumericCast<int32_t>(entry - languages.begin());
+		}
+	}
+	return -1;
+}
+
+string LdbcLanguageDictionary::GetLanguageName(int32_t language_id) const {
+	if (language_id < 0 || static_cast<idx_t>(language_id) >= languages.size()) {
+		return "";
+	}
+	return languages[language_id];
+}
+
+string LdbcLanguageDictionary::GetLanguageList(LdbcJavaRandom &random, int32_t country_id) const {
+	auto language_ids = GetLanguages(random, country_id);
+	auto international_language = GetInternationalLanguage(random);
+	if (international_language != -1 &&
+	    std::find(language_ids.begin(), language_ids.end(), international_language) == language_ids.end()) {
+		language_ids.push_back(international_language);
+	}
+
+	string result;
+	for (idx_t idx = 0; idx < language_ids.size(); idx++) {
+		if (idx > 0) {
+			result += ";";
+		}
+		result += GetLanguageName(language_ids[idx]);
+	}
+	return result;
+}
+
+LdbcNamesDictionary::LdbcNamesDictionary(const string &dictionary_dir, const LdbcPlaceDictionary &places) {
+	for (auto country_id : places.GetCountries()) {
+		surnames_by_country[country_id] = vector<string>();
+		for (idx_t period = 0; period < BIRTH_YEAR_PERIODS; period++) {
+			given_names_male[period][country_id] = vector<string>();
+			given_names_female[period][country_id] = vector<string>();
+		}
+	}
+
+	auto surnames = OpenDictionaryPath(dictionary_dir, "surnameByCountryBirthPlace.txt.freq.sort");
+	string line;
+	while (std::getline(surnames, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		auto columns = SplitWhitespaceLocal(line);
+		auto first_comma = line.find(',');
+		auto second_comma = first_comma == string::npos ? string::npos : line.find(',', first_comma + 1);
+		if (second_comma == string::npos) {
+			throw InvalidInputException("Malformed surnameByCountryBirthPlace.txt.freq.sort line: '%s'", line);
+		}
+		auto country = line.substr(first_comma + 1, second_comma - first_comma - 1);
+		auto country_id = places.GetCountryId(country);
+		if (country_id == -1) {
+			continue;
+		}
+		surnames_by_country[country_id].push_back(TrimWhitespaceLocal(line.substr(second_comma + 1)));
+	}
+
+	auto given_names = OpenDictionaryPath(dictionary_dir, "givennameByCountryBirthPlace.txt.freq.full");
+	while (std::getline(given_names, line)) {
+		line = StripCarriageReturnLocal(line);
+		if (line.empty()) {
+			continue;
+		}
+		vector<string> columns;
+		idx_t offset = 0;
+		while (true) {
+			auto next = line.find("  ", offset);
+			if (next == string::npos) {
+				columns.push_back(TrimWhitespaceLocal(line.substr(offset)));
+				break;
+			}
+			columns.push_back(TrimWhitespaceLocal(line.substr(offset, next - offset)));
+			offset = next + 2;
+		}
+		if (columns.size() < 4) {
+			throw InvalidInputException("Malformed givennameByCountryBirthPlace.txt.freq.full line: '%s'", line);
+		}
+		auto country_id = places.GetCountryId(columns[0]);
+		if (country_id == -1) {
+			continue;
+		}
+		auto gender = std::stoi(columns[2]);
+		auto period = NumericCast<idx_t>(std::stoi(columns[3]));
+		if (period >= BIRTH_YEAR_PERIODS) {
+			throw InvalidInputException("Unsupported name birth-year period in line: '%s'", line);
+		}
+		if (gender == 0) {
+			given_names_male[period][country_id].push_back(columns[1]);
+		} else {
+			given_names_female[period][country_id].push_back(columns[1]);
+		}
+	}
+}
+
+int32_t LdbcNamesDictionary::GetGeometricRandomIndex(LdbcJavaRandom &random, idx_t name_count) const {
+	if (name_count == 0) {
+		return -1;
+	}
+	constexpr int32_t TOP_N = 30;
+	constexpr double GEOMETRIC_P = 0.2;
+	auto probability = random.NextDouble();
+	auto rank = static_cast<int32_t>(std::ceil(std::log1p(-probability) / std::log1p(-GEOMETRIC_P) - 1.0));
+	if (rank < 0) {
+		rank = 0;
+	}
+
+	if (rank < TOP_N) {
+		if (NumericCast<int32_t>(name_count) > rank) {
+			return rank;
+		}
+		return random.NextInt(NumericCast<int32_t>(name_count));
+	}
+
+	if (NumericCast<int32_t>(name_count) > rank) {
+		return TOP_N + random.NextInt(NumericCast<int32_t>(name_count) - TOP_N);
+	}
+	return random.NextInt(NumericCast<int32_t>(name_count));
+}
+
+string LdbcNamesDictionary::GetRandomGivenName(LdbcJavaRandom &random, int32_t country_id, bool is_male,
+                                               int32_t birth_year) const {
+	auto period = birth_year < 1985 ? idx_t(0) : idx_t(1);
+	auto &target = is_male ? given_names_male : given_names_female;
+	auto first_period = target[0].find(country_id);
+	if (first_period == target[0].end() || first_period->second.empty()) {
+		return "";
+	}
+	auto name_id = GetGeometricRandomIndex(random, first_period->second.size());
+	if (name_id >= 30) {
+		return first_period->second[name_id];
+	}
+	auto selected_period = target[period].find(country_id);
+	if (selected_period == target[period].end() || static_cast<idx_t>(name_id) >= selected_period->second.size()) {
+		return "";
+	}
+	return selected_period->second[name_id];
+}
+
+string LdbcNamesDictionary::GetRandomSurname(LdbcJavaRandom &random, int32_t country_id) const {
+	auto entry = surnames_by_country.find(country_id);
+	if (entry == surnames_by_country.end() || entry->second.empty()) {
+		return "";
+	}
+	auto surname_id = GetGeometricRandomIndex(random, entry->second.size());
+	return entry->second[surname_id];
+}
+
+LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, double prob_english, double prob_second_lang)
+    : browsers(LdbcResourcePath(resource_dir, "dictionaries")), places(LdbcResourcePath(resource_dir, "dictionaries")),
+      ips(resource_dir, places),
+      languages(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_english, prob_second_lang),
+      names(LdbcResourcePath(resource_dir, "dictionaries"), places) {
+}
+
+} // namespace duckdb
