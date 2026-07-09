@@ -20,7 +20,8 @@ LOAD ldbc_data_gen;
 SELECT *
 FROM ldbcgen(
     sf := 1.0,
-    output_dir := 'out/sf1',
+    target := 'tables',
+    schema := 'main',
     format := 'parquet',
     overwrite := false
 );
@@ -33,11 +34,33 @@ Returned columns:
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `relation_name` | `VARCHAR` | Generated relation or logical artifact name |
-| `path` | `VARCHAR` | Output path |
+| `path` | `VARCHAR` | Output schema for table generation, or output path for file generation |
 | `row_count` | `BIGINT` | Generated row count, nullable while planning |
 | `checksum` | `VARCHAR` | Stable content checksum, nullable while planning |
 | `format` | `VARCHAR` | `parquet` or `csv` |
 | `status` | `VARCHAR` | Current generation status |
+
+The default generation target is in-database DuckDB tables. File output is explicit:
+
+```sql
+SELECT *
+FROM ldbcgen(
+    sf := 1.0,
+    target := 'files',
+    output_dir := 'out/sf1',
+    format := 'parquet'
+);
+```
+
+Schema-only metadata is available through:
+
+```sql
+SELECT *
+FROM ldbcgen_schema(format := 'parquet')
+ORDER BY relation_name, column_index;
+```
+
+This returns one row per BI static snapshot column, including `relation_name`, `entity_path`, `kind`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`.
 
 ## Reference Scope
 

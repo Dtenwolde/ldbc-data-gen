@@ -14,7 +14,13 @@ require ldbc_data_gen
 # Confirm the table-function contract is registered.
 query TTTTTT
 SELECT relation_name, path, row_count, checksum, format, status
-FROM ldbcgen(sf := 0.003, output_dir := 'out/sf0.003', format := 'parquet', overwrite := false);
+FROM ldbcgen(sf := 0.003);
+----
+ldbc_snb_bi_static	main	NULL	NULL	parquet	planned
+
+query TTTTTT
+SELECT relation_name, path, row_count, checksum, format, status
+FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003', format := 'parquet', overwrite := false);
 ----
 ldbc_snb_bi_static	out/sf0.003	NULL	NULL	parquet	planned
 
@@ -27,3 +33,52 @@ statement error
 SELECT * FROM ldbcgen(sf := 1, format := 'json');
 ----
 Binder Error: ldbcgen parameter format must be either 'parquet' or 'csv'
+
+statement error
+SELECT * FROM ldbcgen(sf := 1, target := 'files');
+----
+Binder Error: ldbcgen parameter output_dir must be set when target is 'files'
+
+statement error
+SELECT * FROM ldbcgen(sf := 1, target := 'memory');
+----
+Binder Error: ldbcgen parameter target must be either 'tables' or 'files'
+
+# Schema-only generation exposes the BI static schema without writing data.
+query I
+SELECT COUNT(DISTINCT relation_name)
+FROM ldbcgen_schema();
+----
+18
+
+query I
+SELECT COUNT(*)
+FROM ldbcgen_schema();
+----
+86
+
+query TTTTTTTT
+SELECT entity_path, kind, snapshot_path, column_index, column_name, nullable, logical_type, primary_key
+FROM ldbcgen_schema(format := 'csv')
+WHERE relation_name = 'Post'
+ORDER BY column_index
+LIMIT 3;
+----
+dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	0	creationDate	false	TIMESTAMP_MS	id
+dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	1	id	false	BIGINT	id
+dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	2	imageFile	true	VARCHAR	id
+
+query TTT
+SELECT column_name, logical_type, primary_key
+FROM ldbcgen_schema()
+WHERE relation_name = 'Person_knows_Person'
+ORDER BY column_index;
+----
+creationDate	TIMESTAMP_MS	Person1Id,Person2Id
+Person1Id	BIGINT	Person1Id,Person2Id
+Person2Id	BIGINT	Person1Id,Person2Id
+
+statement error
+SELECT * FROM ldbcgen_schema(format := 'json');
+----
+Binder Error: ldbcgen_schema parameter format must be either 'parquet' or 'csv'
