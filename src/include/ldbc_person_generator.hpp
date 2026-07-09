@@ -193,6 +193,28 @@ struct LdbcPost {
 	vector<int32_t> tags;
 };
 
+struct LdbcComment {
+	int64_t creation_date;
+	int64_t deletion_date;
+	bool explicitly_deleted;
+	int64_t id;
+	string location_ip;
+	string browser_used;
+	string content;
+	int32_t length;
+	int64_t creator_person_id;
+	int64_t location_country_id;
+	int64_t parent_post_id;
+	int64_t parent_comment_id;
+	vector<int32_t> tags;
+};
+
+struct LdbcLike {
+	int64_t creation_date;
+	int64_t person_id;
+	int64_t message_id;
+};
+
 struct LdbcForum {
 	int64_t creation_date;
 	int64_t deletion_date;
@@ -205,6 +227,9 @@ struct LdbcForum {
 	vector<int32_t> tags;
 	vector<LdbcForumMembership> memberships;
 	vector<LdbcPost> posts;
+	vector<LdbcComment> comments;
+	vector<LdbcLike> post_likes;
+	vector<LdbcLike> comment_likes;
 };
 
 class LdbcFacebookDegreeDistribution {

@@ -716,6 +716,10 @@ struct PersonOwnedRowCounts {
 	idx_t forum_tags = 0;
 	idx_t posts = 0;
 	idx_t post_tags = 0;
+	idx_t comments = 0;
+	idx_t comment_tags = 0;
+	idx_t post_likes = 0;
+	idx_t comment_likes = 0;
 };
 
 static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data) {
@@ -733,6 +737,10 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	auto forum_tag_appender = MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag");
 	auto post_appender = MakeStaticAppender(context, bind_data, "Post");
 	auto post_tag_appender = MakeStaticAppender(context, bind_data, "Post_hasTag_Tag");
+	auto comment_appender = MakeStaticAppender(context, bind_data, "Comment");
+	auto comment_tag_appender = MakeStaticAppender(context, bind_data, "Comment_hasTag_Tag");
+	auto post_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Post");
+	auto comment_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Comment");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() - static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
 	                                                 (1.0 - config.bulkload_portion));
@@ -862,6 +870,59 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 				row_counts.post_tags++;
 			}
 		}
+
+		for (auto &comment : forum.comments) {
+			if (comment.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			comment_appender->BeginRow();
+			comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
+			comment_appender->Append<int64_t>(comment.id);
+			comment_appender->Append(Value(comment.location_ip));
+			comment_appender->Append(Value(comment.browser_used));
+			comment_appender->Append(Value(comment.content));
+			comment_appender->Append<int32_t>(comment.length);
+			comment_appender->Append<int64_t>(comment.creator_person_id);
+			comment_appender->Append<int64_t>(comment.location_country_id);
+			comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT) : Value::BIGINT(comment.parent_post_id));
+			comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
+			                                                         : Value::BIGINT(comment.parent_comment_id));
+			comment_appender->EndRow();
+			row_counts.comments++;
+
+			for (auto tag_id : comment.tags) {
+				comment_tag_appender->BeginRow();
+				comment_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
+				comment_tag_appender->Append<int64_t>(comment.id);
+				comment_tag_appender->Append<int32_t>(tag_id);
+				comment_tag_appender->EndRow();
+				row_counts.comment_tags++;
+			}
+		}
+
+		for (auto &like : forum.post_likes) {
+			if (like.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			post_like_appender->BeginRow();
+			post_like_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(like.creation_date)));
+			post_like_appender->Append<int64_t>(like.person_id);
+			post_like_appender->Append<int64_t>(like.message_id);
+			post_like_appender->EndRow();
+			row_counts.post_likes++;
+		}
+
+		for (auto &like : forum.comment_likes) {
+			if (like.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			comment_like_appender->BeginRow();
+			comment_like_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(like.creation_date)));
+			comment_like_appender->Append<int64_t>(like.person_id);
+			comment_like_appender->Append<int64_t>(like.message_id);
+			comment_like_appender->EndRow();
+			row_counts.comment_likes++;
+		}
 	}
 	person_appender->Close();
 	interest_appender->Close();
@@ -873,6 +934,10 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	forum_tag_appender->Close();
 	post_appender->Close();
 	post_tag_appender->Close();
+	comment_appender->Close();
+	comment_tag_appender->Close();
+	post_like_appender->Close();
+	comment_like_appender->Close();
 	return row_counts;
 }
 
@@ -894,6 +959,10 @@ static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context,
 	row_counts["Forum_hasTag_Tag"] = person_counts.forum_tags;
 	row_counts["Post"] = person_counts.posts;
 	row_counts["Post_hasTag_Tag"] = person_counts.post_tags;
+	row_counts["Comment"] = person_counts.comments;
+	row_counts["Comment_hasTag_Tag"] = person_counts.comment_tags;
+	row_counts["Person_likes_Post"] = person_counts.post_likes;
+	row_counts["Person_likes_Comment"] = person_counts.comment_likes;
 	return row_counts;
 }
 

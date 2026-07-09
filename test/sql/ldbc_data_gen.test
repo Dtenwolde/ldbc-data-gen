@@ -206,9 +206,12 @@ SELECT relation_name, row_count
 FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts')
 WHERE relation_name IN ('Organisation', 'Person', 'Person_hasInterest_Tag', 'Person_studyAt_University',
                         'Person_workAt_Company', 'Person_knows_Person', 'Forum', 'Forum_hasMember_Person',
-                        'Forum_hasTag_Tag', 'Place', 'Tag', 'TagClass')
+                        'Forum_hasTag_Tag', 'Comment', 'Comment_hasTag_Tag', 'Post', 'Post_hasTag_Tag',
+                        'Person_likes_Post', 'Person_likes_Comment', 'Place', 'Tag', 'TagClass')
 ORDER BY relation_name;
 ----
+Comment	471
+Comment_hasTag_Tag	655
 Forum	381
 Forum_hasMember_Person	1253
 Forum_hasTag_Tag	1587
@@ -216,9 +219,13 @@ Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256
 Person_knows_Person	83
+Person_likes_Comment	128
+Person_likes_Post	364
 Person_studyAt_University	42
 Person_workAt_Company	103
 Place	1460
+Post	3189
+Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
 
@@ -265,8 +272,16 @@ UNION ALL SELECT 'Person_workAt_Company', COUNT(*) FROM ldbc_test.Person_workAt_
 UNION ALL SELECT 'Forum', COUNT(*) FROM ldbc_test.Forum
 UNION ALL SELECT 'Forum_hasMember_Person', COUNT(*) FROM ldbc_test.Forum_hasMember_Person
 UNION ALL SELECT 'Forum_hasTag_Tag', COUNT(*) FROM ldbc_test.Forum_hasTag_Tag
+UNION ALL SELECT 'Comment', COUNT(*) FROM ldbc_test.Comment
+UNION ALL SELECT 'Comment_hasTag_Tag', COUNT(*) FROM ldbc_test.Comment_hasTag_Tag
+UNION ALL SELECT 'Post', COUNT(*) FROM ldbc_test.Post
+UNION ALL SELECT 'Post_hasTag_Tag', COUNT(*) FROM ldbc_test.Post_hasTag_Tag
+UNION ALL SELECT 'Person_likes_Post', COUNT(*) FROM ldbc_test.Person_likes_Post
+UNION ALL SELECT 'Person_likes_Comment', COUNT(*) FROM ldbc_test.Person_likes_Comment
 ORDER BY relation_name;
 ----
+Comment	471
+Comment_hasTag_Tag	655
 Forum	381
 Forum_hasMember_Person	1253
 Forum_hasTag_Tag	1587
@@ -274,9 +289,13 @@ Organisation	7955
 Person	50
 Person_hasInterest_Tag	1256
 Person_knows_Person	83
+Person_likes_Comment	128
+Person_likes_Post	364
 Person_studyAt_University	42
 Person_workAt_Company	103
 Place	1460
+Post	3189
+Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
 
@@ -360,6 +379,83 @@ LEFT JOIN ldbc_test.Forum forum ON edge.ForumId = forum.id
 LEFT JOIN ldbc_test.Tag tag ON edge.TagId = tag.id
 WHERE forum.id IS NULL
    OR tag.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Post post
+LEFT JOIN ldbc_test.Person creator ON post.CreatorPersonId = creator.id
+LEFT JOIN ldbc_test.Forum forum ON post.ContainerForumId = forum.id
+LEFT JOIN ldbc_test.Place country ON post.LocationCountryId = country.id
+WHERE creator.id IS NULL
+   OR forum.id IS NULL
+   OR country.id IS NULL
+   OR country.type <> 'Country'
+   OR post.locationIP = ''
+   OR post.browserUsed = ''
+   OR post.length < 0;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Post_hasTag_Tag edge
+LEFT JOIN ldbc_test.Post post ON edge.PostId = post.id
+LEFT JOIN ldbc_test.Tag tag ON edge.TagId = tag.id
+WHERE post.id IS NULL
+   OR tag.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Comment comment
+LEFT JOIN ldbc_test.Person creator ON comment.CreatorPersonId = creator.id
+LEFT JOIN ldbc_test.Place country ON comment.LocationCountryId = country.id
+LEFT JOIN ldbc_test.Post parent_post ON comment.ParentPostId = parent_post.id
+LEFT JOIN ldbc_test.Comment parent_comment ON comment.ParentCommentId = parent_comment.id
+WHERE creator.id IS NULL
+   OR country.id IS NULL
+   OR country.type <> 'Country'
+   OR comment.locationIP = ''
+   OR comment.browserUsed = ''
+   OR comment.content = ''
+   OR comment.length <= 0
+   OR (comment.ParentPostId IS NULL AND comment.ParentCommentId IS NULL)
+   OR (comment.ParentPostId IS NOT NULL AND comment.ParentCommentId IS NOT NULL)
+   OR (comment.ParentPostId IS NOT NULL AND parent_post.id IS NULL)
+   OR (comment.ParentCommentId IS NOT NULL AND parent_comment.id IS NULL);
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Comment_hasTag_Tag edge
+LEFT JOIN ldbc_test.Comment comment ON edge.CommentId = comment.id
+LEFT JOIN ldbc_test.Tag tag ON edge.TagId = tag.id
+WHERE comment.id IS NULL
+   OR tag.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_likes_Post edge
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+LEFT JOIN ldbc_test.Post post ON edge.PostId = post.id
+WHERE person.id IS NULL
+   OR post.id IS NULL;
+----
+0
+
+query I
+SELECT COUNT(*)
+FROM ldbc_test.Person_likes_Comment edge
+LEFT JOIN ldbc_test.Person person ON edge.PersonId = person.id
+LEFT JOIN ldbc_test.Comment comment ON edge.CommentId = comment.id
+WHERE person.id IS NULL
+   OR comment.id IS NULL;
 ----
 0
 
