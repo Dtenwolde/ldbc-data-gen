@@ -29,7 +29,7 @@ CALL ldbcgen(
 );
 ```
 
-The current implementation validates parameters and generates the BI initial snapshot relations either as DuckDB tables or as files. File output also emits Spark-compatible BI insert and delete batches.
+The current implementation validates parameters and generates the BI initial snapshot relations plus BI insert and delete batches either as DuckDB tables or as files.
 
 Returned columns:
 
@@ -42,7 +42,9 @@ Returned columns:
 | `format` | `VARCHAR` | `parquet` or `csv` |
 | `status` | `VARCHAR` | `created` or `recreated` |
 
-The default generation target is in-database DuckDB tables. File output is explicit:
+The default generation target is in-database DuckDB tables. It creates the 18 BI initial snapshot relations using their BI relation names, and dynamic update relations using `inserts_<relation>` and `deletes_<relation>` table names with lowercase relation suffixes, for example `inserts_post` and `deletes_person_likes_comment`.
+
+File output is explicit:
 
 ```sql
 CALL ldbcgen(

@@ -212,6 +212,7 @@ struct LdbcGenBindData : public TableFunctionData {
 	bool overwrite = false;
 	bool primary_keys = false;
 	bool emit_updates = false;
+	bool visible_updates = false;
 };
 
 class LdbcLoadGenerator;
@@ -389,11 +390,21 @@ static idx_t LdbcSchemaSize() {
 	return sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]);
 }
 
-static string LdbcInsertTableName(const string &relation_name) {
+static string LdbcVisibleUpdateTableSuffix(const string &relation_name) {
+	return StringUtil::Lower(relation_name);
+}
+
+static string LdbcInsertTableName(const LdbcGenBindData &bind_data, const string &relation_name) {
+	if (bind_data.visible_updates) {
+		return "inserts_" + LdbcVisibleUpdateTableSuffix(relation_name);
+	}
 	return "__ldbc_insert_" + relation_name;
 }
 
-static string LdbcDeleteTableName(const string &relation_name) {
+static string LdbcDeleteTableName(const LdbcGenBindData &bind_data, const string &relation_name) {
+	if (bind_data.visible_updates) {
+		return "deletes_" + LdbcVisibleUpdateTableSuffix(relation_name);
+	}
 	return "__ldbc_delete_" + relation_name;
 }
 
@@ -416,6 +427,23 @@ static vector<Identifier> SplitPrimaryKey(const string &primary_key) {
 	}
 	if (!current.empty()) {
 		result.push_back(Identifier(current));
+	}
+	return result;
+}
+
+static vector<string> SplitPrimaryKeyNames(const string &primary_key) {
+	vector<string> result;
+	string current;
+	for (auto c : primary_key) {
+		if (c == ',') {
+			result.push_back(current);
+			current.clear();
+		} else {
+			current += c;
+		}
+	}
+	if (!current.empty()) {
+		result.push_back(current);
 	}
 	return result;
 }
@@ -464,6 +492,61 @@ static void CreateLdbcTable(ClientContext &context, const LdbcSchemaColumn *begi
                             const string &catalog_name, const string &schema, bool overwrite, bool primary_keys) {
 	CreateLdbcTableNamed(context, begin, end, catalog_name, schema, string(begin->relation_name), overwrite,
 	                     primary_keys);
+}
+
+static void CreateLdbcInsertTable(ClientContext &context, const LdbcGenBindData &bind_data,
+                                  const LdbcSchemaColumn *begin, const LdbcSchemaColumn *end) {
+	auto table_name = LdbcInsertTableName(bind_data, begin->relation_name);
+	if (bind_data.overwrite) {
+		DropTableIfNeeded(context, bind_data.catalog, bind_data.schema, table_name);
+	}
+
+	auto table_info = make_uniq<CreateTableInfo>(
+	    QualifiedName(Identifier(bind_data.catalog), Identifier(bind_data.schema), Identifier(table_name)));
+	table_info->columns.AddColumn(ColumnDefinition("batch_id", LogicalType::DATE));
+	table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(0)));
+	idx_t column_index = 1;
+	for (auto column = begin; column != end; column++) {
+		table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
+		if (!column->nullable) {
+			table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_index)));
+		}
+		column_index++;
+	}
+	Catalog::GetCatalog(context, Identifier(bind_data.catalog)).CreateTable(context, std::move(table_info));
+}
+
+static void CreateLdbcDeleteTable(ClientContext &context, const LdbcGenBindData &bind_data,
+                                  const LdbcSchemaColumn *begin) {
+	auto table_name = LdbcDeleteTableName(bind_data, begin->relation_name);
+	if (bind_data.overwrite) {
+		DropTableIfNeeded(context, bind_data.catalog, bind_data.schema, table_name);
+	}
+
+	auto table_info = make_uniq<CreateTableInfo>(
+	    QualifiedName(Identifier(bind_data.catalog), Identifier(bind_data.schema), Identifier(table_name)));
+	table_info->columns.AddColumn(ColumnDefinition("batch_id", LogicalType::DATE));
+	table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(0)));
+	table_info->columns.AddColumn(ColumnDefinition("deletionDate", LogicalType::TIMESTAMP_MS));
+	table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(1)));
+	idx_t column_index = 2;
+	for (auto &key : SplitPrimaryKeyNames(begin->primary_key)) {
+		bool found = false;
+		const auto *column = begin;
+		while (column < LDBC_BI_STATIC_SCHEMA + LdbcSchemaSize() && string(column->relation_name) == begin->relation_name) {
+			if (key == column->column_name) {
+				table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
+				table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_index++)));
+				found = true;
+				break;
+			}
+			column++;
+		}
+		if (!found) {
+			throw InternalException("Could not resolve primary key column %s for relation %s", key, begin->relation_name);
+		}
+	}
+	Catalog::GetCatalog(context, Identifier(bind_data.catalog)).CreateTable(context, std::move(table_info));
 }
 
 static string DictionaryPath(const LdbcGenBindData &bind_data, const string &file_name) {
@@ -1424,10 +1507,10 @@ private:
 				}
 				auto relation_name = string(relation.relation_name);
 				insert_appenders[relation_name] =
-				    MakeStaticAppender(context, bind_data, LdbcInsertTableName(relation_name));
+				    MakeStaticAppender(context, bind_data, LdbcInsertTableName(bind_data, relation_name));
 				if (LdbcRelationHasDeletes(relation_name)) {
 					delete_appenders[relation_name] =
-					    MakeStaticAppender(context, bind_data, LdbcDeleteTableName(relation_name));
+					    MakeStaticAppender(context, bind_data, LdbcDeleteTableName(bind_data, relation_name));
 				}
 			}
 		}
@@ -2142,7 +2225,7 @@ static string LdbcQualifiedTableName(const LdbcGenBindData &bind_data, const str
 
 static string LdbcCreateInsertTableSQL(const LdbcGenBindData &bind_data, const LdbcSchemaColumn *begin,
                                        const LdbcSchemaColumn *end) {
-	auto table_name = LdbcInsertTableName(begin->relation_name);
+	auto table_name = LdbcInsertTableName(bind_data, begin->relation_name);
 	string sql = "CREATE TABLE " + LdbcQualifiedTableName(bind_data, table_name) + " (";
 	sql += SQLQuotedIdentifier::ToString("batch_id") + " DATE NOT NULL";
 	for (auto column = begin; column != end; column++) {
@@ -2159,7 +2242,7 @@ static string LdbcCreateInsertTableSQL(const LdbcGenBindData &bind_data, const L
 }
 
 static string LdbcCreateDeleteTableSQL(const LdbcGenBindData &bind_data, const LdbcSchemaColumn *begin) {
-	auto table_name = LdbcDeleteTableName(begin->relation_name);
+	auto table_name = LdbcDeleteTableName(bind_data, begin->relation_name);
 	string sql = "CREATE TABLE " + LdbcQualifiedTableName(bind_data, table_name) + " (";
 	sql += SQLQuotedIdentifier::ToString("batch_id") + " DATE NOT NULL";
 	sql += ", " + SQLQuotedIdentifier::ToString("deletionDate") + " TIMESTAMP_MS NOT NULL";
@@ -2224,6 +2307,28 @@ static void CreateLdbcStagingTablesWithSQL(ClientContext &context, const LdbcGen
 	}
 }
 
+static void CreateLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
+	CreateSchemaIfNeeded(context, bind_data.catalog, bind_data.schema);
+
+	idx_t relation_start = 0;
+	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
+		if (row_idx == LdbcSchemaSize() || string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) !=
+		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx,
+			                bind_data.catalog, bind_data.schema, bind_data.overwrite, bind_data.primary_keys);
+			if (bind_data.emit_updates && string(LDBC_BI_STATIC_SCHEMA[relation_start].kind) != "static_node") {
+				auto relation_name = string(LDBC_BI_STATIC_SCHEMA[relation_start].relation_name);
+				CreateLdbcInsertTable(context, bind_data, LDBC_BI_STATIC_SCHEMA + relation_start,
+				                      LDBC_BI_STATIC_SCHEMA + row_idx);
+				if (LdbcRelationHasDeletes(relation_name)) {
+					CreateLdbcDeleteTable(context, bind_data, LDBC_BI_STATIC_SCHEMA + relation_start);
+				}
+			}
+			relation_start = row_idx;
+		}
+	}
+}
+
 static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &context, const LdbcGenBindData &bind_data,
                                                            LdbcGenGlobalState *progress_state = nullptr) {
 	EnsureLdbcOutputDirectories(context, bind_data);
@@ -2257,7 +2362,7 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 			if (bind_data.overwrite) {
 				insert_options += ", OVERWRITE TRUE";
 			}
-			sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(relation_name)) + " TO " +
+			sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(bind_data, relation_name)) + " TO " +
 			      SQLString::ToString(insert_path) + " (" + insert_options + ")";
 			ExecuteLdbcSQL(context, sql);
 			if (LdbcRelationHasDeletes(relation_name)) {
@@ -2266,7 +2371,7 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 				if (bind_data.overwrite) {
 					delete_options += ", OVERWRITE TRUE";
 				}
-				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(relation_name)) + " TO " +
+				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) + " TO " +
 				      SQLString::ToString(delete_path) + " (" + delete_options + ")";
 				ExecuteLdbcSQL(context, sql);
 			}
@@ -2278,17 +2383,7 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 }
 
 static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
-	CreateSchemaIfNeeded(context, bind_data.catalog, bind_data.schema);
-
-	idx_t relation_start = 0;
-	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
-		if (row_idx == LdbcSchemaSize() || string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) !=
-		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
-			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx,
-			                bind_data.catalog, bind_data.schema, bind_data.overwrite, bind_data.primary_keys);
-			relation_start = row_idx;
-		}
-	}
+	CreateLdbcTables(context, bind_data);
 	return RunLdbcLoadGenerator(context, bind_data);
 }
 
@@ -2297,17 +2392,12 @@ namespace ldbc {
 void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite,
                                       bool primary_keys) {
 	LdbcProfileTimer timer("create_schema");
-	CreateSchemaIfNeeded(context, catalog, schema);
-
-	idx_t relation_start = 0;
-	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
-		if (row_idx == LdbcSchemaSize() || string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) !=
-		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
-			CreateLdbcTable(context, LDBC_BI_STATIC_SCHEMA + relation_start, LDBC_BI_STATIC_SCHEMA + row_idx, catalog,
-			                schema, overwrite, primary_keys);
-			relation_start = row_idx;
-		}
-	}
+	LdbcGenBindData bind_data;
+	bind_data.catalog = std::move(catalog);
+	bind_data.schema = std::move(schema);
+	bind_data.overwrite = overwrite;
+	bind_data.primary_keys = primary_keys;
+	CreateLdbcTables(context, bind_data);
 }
 
 unordered_map<string, idx_t> LDBCGenWrapper::LoadLDBCData(ClientContext &context, string catalog, string schema,
@@ -2370,6 +2460,10 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	if (result->format != "parquet" && result->format != "csv") {
 		throw BinderException("ldbcgen parameter format must be either 'parquet' or 'csv'");
 	}
+	if (result->target == "tables") {
+		result->emit_updates = true;
+		result->visible_updates = true;
+	}
 	if (input.binder && result->target == "tables") {
 		auto &catalog = Catalog::GetCatalog(context, Identifier(result->catalog));
 		auto &properties = input.binder->GetStatementProperties();
@@ -2420,8 +2514,7 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	if (bind_data.target == "tables" && !state.schema_created) {
 		LdbcProfileTimer timer("ldbcgen.materialize");
 		SetLdbcGenProgress(&state, 1.0);
-		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite,
-		                                       bind_data.primary_keys);
+		CreateLdbcTables(context, bind_data);
 		SetLdbcGenProgress(&state, 2.0);
 		state.schema_created = true;
 		if (data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR) {

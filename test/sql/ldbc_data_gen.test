@@ -253,14 +253,14 @@ SELECT COUNT(*)
 FROM duckdb_tables()
 WHERE schema_name = 'ldbc_test';
 ----
-18
+40
 
 query I
 SELECT COUNT(*)
 FROM duckdb_columns()
 WHERE schema_name = 'ldbc_test';
 ----
-86
+196
 
 query TTTT
 SELECT table_name, column_name, data_type, is_nullable
@@ -313,6 +313,18 @@ Post	3189
 Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
+
+query TI
+SELECT 'inserts_post' AS relation_name, COUNT(*) AS row_count FROM ldbc_test.inserts_post
+UNION ALL SELECT 'inserts_person_knows_person', COUNT(*) FROM ldbc_test.inserts_person_knows_person
+UNION ALL SELECT 'deletes_post', COUNT(*) FROM ldbc_test.deletes_post
+UNION ALL SELECT 'deletes_person_likes_comment', COUNT(*) FROM ldbc_test.deletes_person_likes_comment
+ORDER BY relation_name;
+----
+deletes_person_likes_comment	1
+deletes_post	5
+inserts_person_knows_person	5
+inserts_post	196
 
 query II
 SELECT COUNT(*),
