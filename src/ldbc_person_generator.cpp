@@ -1720,6 +1720,7 @@ static bool CreateAlbumForum(const LdbcDatagenConfig &config, const LdbcDateGene
 
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
                                      const vector<LdbcKnowsEdge> &knows_edges,
+                                     const std::function<void(LdbcForum &&forum)> &emit_forum,
                                      const std::function<void(idx_t done, idx_t total)> &progress) {
 	LdbcForumGenerationProfile profile;
 	auto previous_profile = ldbc_forum_profile;
@@ -1785,6 +1786,13 @@ vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vect
 	}
 
 	vector<LdbcForum> forums;
+	auto emit = [&](LdbcForum &&forum) {
+		if (emit_forum) {
+			emit_forum(std::move(forum));
+		} else {
+			forums.push_back(std::move(forum));
+		}
+	};
 	idx_t processed_persons = 0;
 	for (idx_t block_start = 0; block_start < random_ranked_persons.size();
 	     block_start += NumericCast<idx_t>(config.block_size)) {
@@ -1849,7 +1857,7 @@ vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vect
 				profile.emitted_comments += NumericCast<int64_t>(wall.comments.size());
 				profile.emitted_post_likes += NumericCast<int64_t>(wall.post_likes.size());
 				profile.emitted_comment_likes += NumericCast<int64_t>(wall.comment_likes.size());
-				forums.push_back(std::move(wall));
+				emit(std::move(wall));
 			} else {
 				local_forum_id++;
 			}
@@ -1902,7 +1910,7 @@ vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vect
 					profile.emitted_comments += NumericCast<int64_t>(forum.comments.size());
 					profile.emitted_post_likes += NumericCast<int64_t>(forum.post_likes.size());
 					profile.emitted_comment_likes += NumericCast<int64_t>(forum.comment_likes.size());
-					forums.push_back(std::move(forum));
+					emit(std::move(forum));
 				}
 				local_forum_id++;
 			}
@@ -1943,7 +1951,7 @@ vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vect
 					profile.emitted_comments += NumericCast<int64_t>(forum.comments.size());
 					profile.emitted_post_likes += NumericCast<int64_t>(forum.post_likes.size());
 					profile.emitted_comment_likes += NumericCast<int64_t>(forum.comment_likes.size());
-					forums.push_back(std::move(forum));
+					emit(std::move(forum));
 				}
 				local_forum_id++;
 			}

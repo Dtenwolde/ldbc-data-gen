@@ -273,6 +273,7 @@ vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
 vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
                                      const vector<LdbcKnowsEdge> &knows_edges,
+                                     const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
                                      const std::function<void(idx_t done, idx_t total)> &progress = nullptr);
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms);

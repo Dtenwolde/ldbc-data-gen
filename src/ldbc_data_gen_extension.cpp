@@ -205,11 +205,26 @@ struct LdbcGenBindData : public TableFunctionData {
 };
 
 struct LdbcGenGlobalState : public GlobalTableFunctionState {
-	bool materialized = false;
+	bool schema_created = false;
+	std::atomic<bool> load_started {false};
+	std::atomic<bool> materialized {false};
+	std::atomic<bool> finished {false};
 	idx_t offset = 0;
 	std::atomic<double> progress {0.0};
 	unordered_map<string, idx_t> row_counts;
 };
+
+class LdbcGenYieldTask : public AsyncTask {
+public:
+	void Execute() override {
+	}
+};
+
+static AsyncResult LdbcGenYield() {
+	vector<unique_ptr<AsyncTask>> tasks;
+	tasks.push_back(make_uniq<LdbcGenYieldTask>());
+	return AsyncResult(std::move(tasks));
+}
 
 static void SetLdbcGenProgress(LdbcGenGlobalState *state, double progress) {
 	if (!state) {
@@ -969,18 +984,9 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	}
 	SetLdbcGenProgress(progress_state, 65.0);
 
-	vector<LdbcForum> forums;
 	{
 		LdbcProfileTimer phase("generate.forums");
-		forums = LdbcGenerateForums(config, persons, knows_edges, [&](idx_t done, idx_t total) {
-			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(65.0, 93.0, done, total));
-		});
-	}
-	SetLdbcGenProgress(progress_state, 93.0);
-	{
-		LdbcProfileTimer phase("append.forums_messages_likes");
-		for (idx_t forum_idx = 0; forum_idx < forums.size(); forum_idx++) {
-			auto &forum = forums[forum_idx];
+		auto append_forum = [&](LdbcForum &&forum) {
 			if (forum.creation_date < bulkload_threshold) {
 				forum_appender->BeginRow();
 				forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
@@ -1076,10 +1082,10 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 				                             like.message_id);
 				row_counts.comment_likes++;
 			}
-			if ((forum_idx & 255) == 0) {
-				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(93.0, 98.0, forum_idx + 1, forums.size()));
-			}
-		}
+		};
+		LdbcGenerateForums(config, persons, knows_edges, append_forum, [&](idx_t done, idx_t total) {
+			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
+		});
 	}
 	SetLdbcGenProgress(progress_state, 98.0);
 	person_appender->Close();
@@ -1292,6 +1298,31 @@ static unique_ptr<GlobalTableFunctionState> LdbcGenInit(ClientContext &context, 
 	return make_uniq<LdbcGenGlobalState>();
 }
 
+class LdbcGenLoadTask : public AsyncTask {
+public:
+	LdbcGenLoadTask(ClientContext &context_p, LdbcGenBindData bind_data_p, LdbcGenGlobalState &state_p)
+	    : context(context_p), bind_data(std::move(bind_data_p)), state(state_p) {
+	}
+
+	void Execute() override {
+		LdbcProfileTimer timer("ldbcgen.materialize");
+		state.row_counts = PopulateStaticTables(context, bind_data, &state);
+		SetLdbcGenProgress(&state, 98.0);
+		state.materialized.store(true);
+	}
+
+private:
+	ClientContext &context;
+	LdbcGenBindData bind_data;
+	LdbcGenGlobalState &state;
+};
+
+static AsyncResult LdbcGenLoad(ClientContext &context, const LdbcGenBindData &bind_data, LdbcGenGlobalState &state) {
+	vector<unique_ptr<AsyncTask>> tasks;
+	tasks.push_back(make_uniq<LdbcGenLoadTask>(context, bind_data, state));
+	return AsyncResult(std::move(tasks));
+}
+
 static double LdbcGenProgress(ClientContext &context, const FunctionData *bind_data,
                               const GlobalTableFunctionState *global_state) {
 	if (!global_state) {
@@ -1305,19 +1336,48 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	auto &bind_data = data_p.bind_data->Cast<LdbcGenBindData>();
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
 
-	if (bind_data.target == "tables" && !state.materialized) {
+	if (state.finished.load()) {
+		data_p.async_result = AsyncResultType::FINISHED;
+		return;
+	}
+
+	if (bind_data.target == "tables" && !state.schema_created) {
 		LdbcProfileTimer timer("ldbcgen.materialize");
 		SetLdbcGenProgress(&state, 1.0);
 		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite,
 		                                       bind_data.primary_keys);
 		SetLdbcGenProgress(&state, 2.0);
-		state.row_counts = PopulateStaticTables(context, bind_data, &state);
-		SetLdbcGenProgress(&state, 98.0);
-		state.materialized = true;
+		state.schema_created = true;
+		if (data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR) {
+			data_p.async_result = LdbcGenYield();
+			return;
+		}
+	}
+
+	if (bind_data.target == "tables" && !state.materialized.load()) {
+		if (!state.load_started.exchange(true)) {
+			if (data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR) {
+				data_p.async_result = LdbcGenLoad(context, bind_data, state);
+				return;
+			}
+			LdbcProfileTimer timer("ldbcgen.materialize");
+			state.row_counts = PopulateStaticTables(context, bind_data, &state);
+			SetLdbcGenProgress(&state, 98.0);
+			state.materialized.store(true);
+		} else if (!state.materialized.load()) {
+			data_p.async_result = AsyncResultType::BLOCKED;
+			return;
+		}
+		if (data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR) {
+			data_p.async_result = LdbcGenYield();
+			return;
+		}
 	}
 
 	if (state.offset >= (bind_data.target == "tables" ? ldbc::LDBCGenWrapper::RelationCount() : 1)) {
 		SetLdbcGenProgress(&state, 100.0);
+		state.finished.store(true);
+		data_p.async_result = AsyncResultType::FINISHED;
 		return;
 	}
 
