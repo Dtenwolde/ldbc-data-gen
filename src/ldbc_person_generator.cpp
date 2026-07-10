@@ -449,8 +449,7 @@ struct LdbcKnowsGenerator::Impl {
 
 	Impl(const LdbcDatagenConfig &config_p, const vector<LdbcPersonCore> &persons_p, idx_t threads_p,
 	     ClientContext *context_p)
-	    : config(config_p), persons(persons_p), threads(MaxValue<idx_t>(threads_p, 1)),
-	      context(context_p),
+	    : config(config_p), persons(persons_p), threads(MaxValue<idx_t>(threads_p, 1)), context(context_p),
 	      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
 	                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ),
 	      dates(config) {
@@ -509,7 +508,8 @@ struct LdbcKnowsGenerator::Impl {
 		}
 		auto block_size = NumericCast<idx_t>(config.block_size);
 		auto blocks = (persons.size() + block_size - 1) / block_size;
-		auto completed_blocks = step_index * blocks + std::min<idx_t>(blocks, (block_start + block_size - 1) / block_size);
+		auto completed_blocks =
+		    step_index * blocks + std::min<idx_t>(blocks, (block_start + block_size - 1) / block_size);
 		auto total_blocks = percentages.size() * blocks;
 		return total_blocks == 0 ? 100.0 : 90.0 * (static_cast<double>(completed_blocks) / total_blocks);
 	}
@@ -524,7 +524,8 @@ struct LdbcKnowsGenerator::Impl {
 		for (idx_t idx = 0; idx < persons.size(); idx++) {
 			order.push_back(idx);
 		}
-		std::stable_sort(order.begin(), order.end(), [&](idx_t left, idx_t right) { return CompareForStep(left, right); });
+		std::stable_sort(order.begin(), order.end(),
+		                 [&](idx_t left, idx_t right) { return CompareForStep(left, right); });
 		block_start = 0;
 	}
 
@@ -903,14 +904,14 @@ static void PrintForumGenerationProfile(const LdbcForumGenerationProfile &profil
 	std::cerr << "[ldbcgen] generate.forums.consume_likes: " << profile.consume_likes_ms << " ms\n";
 	std::cerr << "[ldbcgen] generate.forums.flashmob_build_tags: " << profile.flashmob_build_tags_ms << " ms\n";
 	std::cerr << "[ldbcgen] generate.forums.flashmob_select_tags: " << profile.flashmob_select_tags_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.counts: walls=" << profile.wall_forums
-	          << " groups=" << profile.group_forums << " albums=" << profile.album_forums
-	          << " requested_uniform_posts=" << profile.requested_uniform_posts
+	std::cerr << "[ldbcgen] generate.forums.counts: walls=" << profile.wall_forums << " groups=" << profile.group_forums
+	          << " albums=" << profile.album_forums << " requested_uniform_posts=" << profile.requested_uniform_posts
 	          << " requested_flashmob_posts=" << profile.requested_flashmob_posts
 	          << " requested_photos=" << profile.requested_photos << " emitted_posts=" << profile.emitted_posts
-	          << " emitted_comments=" << profile.emitted_comments << " emitted_post_likes=" << profile.emitted_post_likes
-	          << " emitted_comment_likes=" << profile.emitted_comment_likes
-	          << " memberships=" << profile.memberships << "\n";
+	          << " emitted_comments=" << profile.emitted_comments
+	          << " emitted_post_likes=" << profile.emitted_post_likes
+	          << " emitted_comment_likes=" << profile.emitted_comment_likes << " memberships=" << profile.memberships
+	          << "\n";
 }
 
 static int64_t NumberOfMonths(const LdbcDateGenerator &dates, int64_t from_date) {
@@ -1154,8 +1155,7 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 		{
 			unique_ptr<LdbcScopedProfileAccumulator> scan_timer;
 			if (ldbc_forum_profile) {
-				scan_timer =
-				    make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->comment_membership_scan_ms);
+				scan_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->comment_membership_scan_ms);
 			}
 			for (auto &membership : memberships) {
 				if ((membership.creation_date < parent.creation_date &&
@@ -1628,8 +1628,7 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 			{
 				unique_ptr<LdbcScopedProfileAccumulator> select_timer;
 				if (ldbc_forum_profile) {
-					select_timer =
-					    make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->flashmob_select_tags_ms);
+					select_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->flashmob_select_tags_ms);
 				}
 				auto earliest_idx =
 				    SearchEarliestForumFlashmobTag(forum_flashmob_tags, membership, FLASHMOB_SPAN, config.delta);
@@ -2157,9 +2156,10 @@ struct LdbcForumGenerator::Impl {
 		}
 		{
 			LdbcScopedProfileAccumulator timer(state.profile.block_sort_ms);
-			std::sort(state.block.begin(), state.block.end(), [](const LdbcPersonCore *left, const LdbcPersonCore *right) {
-				return left->account_id < right->account_id;
-			});
+			std::sort(state.block.begin(), state.block.end(),
+			          [](const LdbcPersonCore *left, const LdbcPersonCore *right) {
+				          return left->account_id < right->account_id;
+			          });
 		}
 		LdbcForumProfileScope block_profile_scope(state.profile);
 		for (auto person : state.block) {
@@ -2203,8 +2203,8 @@ struct LdbcForumGenerator::Impl {
 		TaskExecutor executor(*context);
 		auto worker_count = MinValue<idx_t>(threads, generated_blocks.size());
 		for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
-			executor.ScheduleTask(make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks,
-			                                                    next_block));
+			executor.ScheduleTask(
+			    make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks, next_block));
 		}
 		executor.WorkOnTasks();
 	}
@@ -2229,12 +2229,12 @@ struct LdbcForumGenerator::Impl {
 			for (auto &membership : wall.memberships) {
 				auto member = persons_by_id.find(membership.person_id);
 				if (member != persons_by_id.end()) {
-					wall_forum_memberships.push_back({member->second, membership.creation_date, membership.deletion_date});
+					wall_forum_memberships.push_back(
+					    {member->second, membership.creation_date, membership.deletion_date});
 				}
 			}
-			auto uniform_posts =
-			    NumPostsPerForum(config, dates, current_random_farm, wall, config.max_num_post_per_month,
-			                     config.max_num_friends);
+			auto uniform_posts = NumPostsPerForum(config, dates, current_random_farm, wall,
+			                                      config.max_num_post_per_month, config.max_num_friends);
 			auto flashmob_posts = NumPostsPerForum(config, dates, current_random_farm, wall,
 			                                       config.max_num_flashmob_post_per_month, config.max_num_friends);
 			current_profile.requested_uniform_posts += uniform_posts;
@@ -2268,20 +2268,21 @@ struct LdbcForumGenerator::Impl {
 			bool created_group;
 			{
 				LdbcScopedProfileAccumulator timer(current_profile.create_group_ms);
-				created_group = CreateGroupForum(config, dates, dictionaries, current_random_farm, person, current_block,
-				                                 friends, current_local_forum_id, current_block_id, forum);
+				created_group =
+				    CreateGroupForum(config, dates, dictionaries, current_random_farm, person, current_block, friends,
+				                     current_local_forum_id, current_block_id, forum);
 			}
 			if (created_group) {
 				vector<LdbcActivityMembership> group_post_memberships;
 				for (auto &membership : forum.memberships) {
 					auto member = persons_by_id.find(membership.person_id);
 					if (member != persons_by_id.end()) {
-						group_post_memberships.push_back({member->second, membership.creation_date, membership.deletion_date});
+						group_post_memberships.push_back(
+						    {member->second, membership.creation_date, membership.deletion_date});
 					}
 				}
-				auto uniform_posts =
-				    NumPostsPerForum(config, dates, current_random_farm, forum, config.max_num_group_post_per_month,
-				                     config.max_group_size);
+				auto uniform_posts = NumPostsPerForum(config, dates, current_random_farm, forum,
+				                                      config.max_num_group_post_per_month, config.max_group_size);
 				auto flashmob_posts =
 				    NumPostsPerForum(config, dates, current_random_farm, forum,
 				                     config.max_num_group_flashmob_post_per_month, config.max_group_size);
@@ -2315,16 +2316,16 @@ struct LdbcForumGenerator::Impl {
 			bool created_album;
 			{
 				LdbcScopedProfileAccumulator timer(current_profile.create_album_ms);
-				created_album =
-				    CreateAlbumForum(config, dates, dictionaries, current_random_farm, person, friends,
-				                     current_local_forum_id, album_idx, current_block_id, forum);
+				created_album = CreateAlbumForum(config, dates, dictionaries, current_random_farm, person, friends,
+				                                 current_local_forum_id, album_idx, current_block_id, forum);
 			}
 			if (created_album) {
 				vector<LdbcActivityMembership> album_memberships;
 				for (auto &membership : forum.memberships) {
 					auto member = persons_by_id.find(membership.person_id);
 					if (member != persons_by_id.end()) {
-						album_memberships.push_back({member->second, membership.creation_date, membership.deletion_date});
+						album_memberships.push_back(
+						    {member->second, membership.creation_date, membership.deletion_date});
 					}
 				}
 				auto photo_count =

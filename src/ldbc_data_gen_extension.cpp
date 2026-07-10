@@ -1220,7 +1220,7 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 }
 
 static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                        LdbcGenGlobalState *progress_state = nullptr) {
+                                                         LdbcGenGlobalState *progress_state = nullptr) {
 	LdbcProfileTimer timer("populate.total");
 	StaticDictionaryData data;
 	{
@@ -1526,8 +1526,8 @@ private:
 			person_counts.persons++;
 
 			for (auto tag_id : person.interests) {
-				AppendTimestampInt64Int32Row(*interest_appender, LdbcTimestampMs(person.creation_date), person.account_id,
-				                             tag_id);
+				AppendTimestampInt64Int32Row(*interest_appender, LdbcTimestampMs(person.creation_date),
+				                             person.account_id, tag_id);
 				person_counts.interests++;
 			}
 			if (person.university_id != -1 && person.class_year != -1) {
@@ -1590,9 +1590,12 @@ private:
 	bool GenerateForums() {
 		if (!forum_generator) {
 			LdbcProfileTimer timer("generate.forums.init");
-			auto append_forum = [&](LdbcForum &&forum) { AppendForum(forum); };
+			auto append_forum = [&](LdbcForum &&forum) {
+				AppendForum(forum);
+			};
 			forum_generator = make_uniq<LdbcForumGenerator>(
-			    *config, persons, knows_edges, append_forum, [&](idx_t done, idx_t total) {
+			    *config, persons, knows_edges, append_forum,
+			    [&](idx_t done, idx_t total) {
 				    SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
 			    },
 			    bind_data.threads, &context);
@@ -1615,7 +1618,8 @@ private:
 			forum_appender->EndRow();
 			person_counts.forums++;
 			for (auto tag_id : forum.tags) {
-				AppendTimestampInt64Int32Row(*forum_tag_appender, LdbcTimestampMs(forum.creation_date), forum.id, tag_id);
+				AppendTimestampInt64Int32Row(*forum_tag_appender, LdbcTimestampMs(forum.creation_date), forum.id,
+				                             tag_id);
 				person_counts.forum_tags++;
 			}
 		}
@@ -1847,9 +1851,8 @@ static void CreateLdbcStagingTablesWithSQL(ClientContext &context, const LdbcGen
 	                            SQLQuotedIdentifier::ToString(bind_data.schema));
 	idx_t relation_start = 0;
 	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
-		if (row_idx != LdbcSchemaSize() &&
-		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) ==
-		        LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+		if (row_idx != LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) ==
+		                                       LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
 			continue;
 		}
 		auto relation_name = string(LDBC_BI_STATIC_SCHEMA[relation_start].relation_name);
@@ -2060,7 +2063,8 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		if (!state.load_generator) {
 			throw InternalException("LDBC load generator was not initialized");
 		}
-		idx_t iterations = data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
+		idx_t iterations =
+		    data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
 		for (idx_t iteration = 0; iteration < iterations; iteration++) {
 			if (state.load_generator->GenerateNext()) {
 				state.row_counts = state.load_generator->ReleaseRowCounts();
@@ -2084,9 +2088,9 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			state.file_connection = make_uniq<Connection>(*state.file_database);
 			state.file_bind_data = make_uniq<LdbcGenBindData>(bind_data);
 			state.file_bind_data->target = "tables";
-			state.file_bind_data->catalog = DatabaseManager::GetDefaultDatabase(*state.file_connection->context).GetIdentifierName();
-			state.file_bind_data->schema =
-			    "__ldbcgen_files_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
+			state.file_bind_data->catalog =
+			    DatabaseManager::GetDefaultDatabase(*state.file_connection->context).GetIdentifierName();
+			state.file_bind_data->schema = "__ldbcgen_files_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
 			state.file_bind_data->overwrite = true;
 			state.file_bind_data->primary_keys = false;
 			auto &file_context = *state.file_connection->context;
@@ -2099,16 +2103,17 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			throw InternalException("LDBC file load generator was not initialized");
 		}
 		auto &file_context = *state.file_connection->context;
-		idx_t iterations = data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
+		idx_t iterations =
+		    data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
 		for (idx_t iteration = 0; iteration < iterations; iteration++) {
 			if (state.load_generator->GenerateNext()) {
 				state.row_counts = state.load_generator->ReleaseRowCounts();
 				state.load_generator.reset();
 				ExecuteLdbcSQL(file_context, "COMMIT");
 				state.output_paths = CopyLdbcTablesToFiles(file_context, *state.file_bind_data, &state);
-				ExecuteLdbcSQL(file_context, "DROP SCHEMA " + SQLQuotedIdentifier::ToString(state.file_bind_data->catalog) +
-				                                 "." + SQLQuotedIdentifier::ToString(state.file_bind_data->schema) +
-				                                 " CASCADE");
+				ExecuteLdbcSQL(file_context,
+				               "DROP SCHEMA " + SQLQuotedIdentifier::ToString(state.file_bind_data->catalog) + "." +
+				                   SQLQuotedIdentifier::ToString(state.file_bind_data->schema) + " CASCADE");
 				state.file_bind_data.reset();
 				state.file_connection.reset();
 				state.file_database.reset();

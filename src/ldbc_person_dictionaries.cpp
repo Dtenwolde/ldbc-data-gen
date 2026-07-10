@@ -830,8 +830,8 @@ string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, con
 				auto fragment = LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
 				result += prefix;
 				result += fragment;
-				result_length += tag_text_bmp_only[tag_idx] ? this_tag_text_size
-				                                            : prefix_length + LdbcJavaStringLength(fragment);
+				result_length +=
+				    tag_text_bmp_only[tag_idx] ? this_tag_text_size : prefix_length + LdbcJavaStringLength(fragment);
 			}
 		}
 	}
