@@ -36,7 +36,8 @@ static string ClampStringLocal(const string &value, idx_t max_length) {
 }
 
 static int64_t RandomDateUnchecked(LdbcJavaRandom &random, int64_t min_date, int64_t max_date) {
-	return static_cast<int64_t>(random.NextDouble() * static_cast<double>(max_date - min_date) + min_date);
+	auto offset = random.NextDouble() * static_cast<double>(max_date - min_date);
+	return static_cast<int64_t>(offset + static_cast<double>(min_date));
 }
 
 static bool LdbcPersonProfileEnabled() {
@@ -108,8 +109,8 @@ LdbcDateGenerator::LdbcDateGenerator(const LdbcDatagenConfig &config)
 }
 
 int64_t LdbcDateGenerator::RandomPersonCreationDate(LdbcJavaRandom &random) const {
-	return static_cast<int64_t>(static_cast<double>(simulation_start) +
-	                            random.NextDouble() * static_cast<double>(simulation_end - simulation_start));
+	auto offset = random.NextDouble() * static_cast<double>(simulation_end - simulation_start);
+	return static_cast<int64_t>(static_cast<double>(simulation_start) + offset);
 }
 
 int64_t LdbcDateGenerator::RandomBirthday(LdbcJavaRandom &random) const {
@@ -121,7 +122,8 @@ int64_t LdbcDateGenerator::RandomBirthday(LdbcJavaRandom &random) const {
 int64_t LdbcDateGenerator::RandomDate(LdbcJavaRandom &random, int64_t min_date, int64_t max_date) const {
 	// Spark guards this with a Java assert, but assertions are disabled in normal datagen runs.
 	// Preserve the observed behavior, including zero-width and inverted intervals.
-	return static_cast<int64_t>(random.NextDouble() * static_cast<double>(max_date - min_date) + min_date);
+	auto offset = random.NextDouble() * static_cast<double>(max_date - min_date);
+	return static_cast<int64_t>(offset + static_cast<double>(min_date));
 }
 
 int64_t LdbcDateGenerator::RandomPersonDeletionDate(LdbcJavaRandom &random, int64_t creation_date,
@@ -1082,7 +1084,7 @@ public:
 				break;
 			}
 		}
-		auto deletion_date = min_date + static_cast<int64_t>(draw);
+		auto deletion_date = static_cast<int64_t>(static_cast<double>(min_date) + draw);
 		if (deletion_date > max_date) {
 			deletion_date = min_date + (max_date - min_date) / 2;
 		}
@@ -1118,6 +1120,9 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 			continue;
 		}
 		auto like_creation = dates.RandomDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE), min_creation, max_creation);
+		int64_t like_deletion = std::min(std::min(membership.person->deletion_date, message.deletion_date),
+		                                 dates.SimulationEnd());
+		bool explicitly_deleted = false;
 		if (membership.person->message_deleter &&
 		    random_farm.Get(LdbcRandomAspect::DELETION_LIKES).NextDouble() < config.prob_like_deleted) {
 			auto min_deletion = like_creation + config.delta;
@@ -1126,10 +1131,12 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 			if (max_deletion <= min_deletion) {
 				continue;
 			}
-			delete_distribution.NextDeleteDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE), min_deletion, max_deletion);
+			explicitly_deleted = true;
+			like_deletion =
+			    delete_distribution.NextDeleteDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE), min_deletion, max_deletion);
 		}
 		auto &likes = comment_like ? forum.comment_likes : forum.post_likes;
-		likes.push_back({like_creation, membership.person->account_id, message.id});
+		likes.push_back({like_creation, like_deletion, explicitly_deleted, membership.person->account_id, message.id});
 	}
 }
 

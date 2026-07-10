@@ -53,7 +53,7 @@ CALL ldbcgen(
 );
 ```
 
-File output writes one file per BI static relation under `<output_dir>/static/` and `<output_dir>/dynamic/`. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing files.
+File output writes one file per BI static relation under `<output_dir>/static/` and `<output_dir>/dynamic/`. It also writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing files.
 
 Schema-only metadata is available through:
 
@@ -121,6 +121,12 @@ python3 tools/dynamic_parity.py
 
 This currently covers `Person`, `Person_hasInterest_Tag`, `Person_studyAt_University`,
 `Person_workAt_Company`, and `Person_knows_Person`.
+
+Compare BI insert/delete batches against Spark reference output:
+
+```sh
+python3 tools/bi_update_parity.py
+```
 
 Generate the pinned Spark reference output locally:
 

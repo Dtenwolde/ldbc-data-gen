@@ -215,6 +215,8 @@ struct LdbcComment {
 
 struct LdbcLike {
 	int64_t creation_date;
+	int64_t deletion_date;
+	bool explicitly_deleted;
 	int64_t person_id;
 	int64_t message_id;
 };
