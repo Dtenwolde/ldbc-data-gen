@@ -593,6 +593,88 @@ static unique_ptr<InternalAppender> MakeStaticAppender(ClientContext &context, c
 	return make_uniq<InternalAppender>(context, table);
 }
 
+class LdbcChunkAppender {
+public:
+	explicit LdbcChunkAppender(unique_ptr<InternalAppender> appender_p, vector<LogicalType> types)
+	    : appender(std::move(appender_p)) {
+		chunk.Initialize(Allocator::DefaultAllocator(), types);
+	}
+
+	void AppendTimestamp(idx_t column, idx_t row_index, timestamp_t value) {
+		FlatVector::GetDataMutable<timestamp_t>(chunk.data[column])[row_index] = value;
+	}
+
+	void AppendInt32(idx_t column, idx_t row_index, int32_t value) {
+		FlatVector::GetDataMutable<int32_t>(chunk.data[column])[row_index] = value;
+	}
+
+	void AppendInt64(idx_t column, idx_t row_index, int64_t value) {
+		FlatVector::GetDataMutable<int64_t>(chunk.data[column])[row_index] = value;
+	}
+
+	idx_t CurrentRow() const {
+		return row;
+	}
+
+	void EndRow() {
+		row++;
+		if (row == STANDARD_VECTOR_SIZE) {
+			Flush();
+		}
+	}
+
+	void Close() {
+		Flush();
+		appender->Close();
+	}
+
+private:
+	void Flush() {
+		if (row == 0) {
+			return;
+		}
+		chunk.SetCardinality(row);
+		appender->AppendDataChunk(chunk);
+		chunk.Reset();
+		row = 0;
+	}
+
+private:
+	unique_ptr<InternalAppender> appender;
+	DataChunk chunk;
+	idx_t row = 0;
+};
+
+static LdbcChunkAppender MakeTimestampInt64Int64Appender(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                         const string &table_name) {
+	return LdbcChunkAppender(MakeStaticAppender(context, bind_data, table_name),
+	                         {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT});
+}
+
+static LdbcChunkAppender MakeTimestampInt64Int32Appender(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                         const string &table_name) {
+	return LdbcChunkAppender(MakeStaticAppender(context, bind_data, table_name),
+	                         {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
+}
+
+static void AppendTimestampInt64Int64Row(LdbcChunkAppender &appender, timestamp_t creation_date, int64_t id1,
+                                         int64_t id2) {
+	auto row = appender.CurrentRow();
+	appender.AppendTimestamp(0, row, creation_date);
+	appender.AppendInt64(1, row, id1);
+	appender.AppendInt64(2, row, id2);
+	appender.EndRow();
+}
+
+static void AppendTimestampInt64Int32Row(LdbcChunkAppender &appender, timestamp_t creation_date, int64_t id1,
+                                         int32_t id2) {
+	auto row = appender.CurrentRow();
+	appender.AppendTimestamp(0, row, creation_date);
+	appender.AppendInt64(1, row, id1);
+	appender.AppendInt32(2, row, id2);
+	appender.EndRow();
+}
+
 static idx_t AppendPlaces(ClientContext &context, const LdbcGenBindData &bind_data, const StaticDictionaryData &data) {
 	auto appender = MakeStaticAppender(context, bind_data, "Place");
 	for (auto &place : data.places) {
@@ -750,19 +832,19 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	auto persons = LdbcGeneratePersons(config);
 	SetLdbcGenProgress(progress_state, 25.0);
 	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
-	auto interest_appender = MakeStaticAppender(context, bind_data, "Person_hasInterest_Tag");
+	auto interest_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Person_hasInterest_Tag");
 	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
 	auto work_appender = MakeStaticAppender(context, bind_data, "Person_workAt_Company");
-	auto knows_appender = MakeStaticAppender(context, bind_data, "Person_knows_Person");
+	auto knows_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_knows_Person");
 	auto forum_appender = MakeStaticAppender(context, bind_data, "Forum");
-	auto forum_member_appender = MakeStaticAppender(context, bind_data, "Forum_hasMember_Person");
-	auto forum_tag_appender = MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag");
+	auto forum_member_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Forum_hasMember_Person");
+	auto forum_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Forum_hasTag_Tag");
 	auto post_appender = MakeStaticAppender(context, bind_data, "Post");
-	auto post_tag_appender = MakeStaticAppender(context, bind_data, "Post_hasTag_Tag");
+	auto post_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Post_hasTag_Tag");
 	auto comment_appender = MakeStaticAppender(context, bind_data, "Comment");
-	auto comment_tag_appender = MakeStaticAppender(context, bind_data, "Comment_hasTag_Tag");
-	auto post_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Post");
-	auto comment_like_appender = MakeStaticAppender(context, bind_data, "Person_likes_Comment");
+	auto comment_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Comment_hasTag_Tag");
+	auto post_like_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_likes_Post");
+	auto comment_like_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_likes_Comment");
 	auto bulkload_threshold =
 	    dates.SimulationEnd() -
 	    static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
@@ -791,11 +873,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 		row_counts.persons++;
 
 		for (auto tag_id : person.interests) {
-			interest_appender->BeginRow();
-			interest_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-			interest_appender->Append<int64_t>(person.account_id);
-			interest_appender->Append<int32_t>(tag_id);
-			interest_appender->EndRow();
+			AppendTimestampInt64Int32Row(interest_appender, LdbcTimestampMs(person.creation_date), person.account_id,
+			                             tag_id);
 			row_counts.interests++;
 		}
 
@@ -831,11 +910,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 		if (edge.creation_date >= bulkload_threshold) {
 			continue;
 		}
-		knows_appender->BeginRow();
-		knows_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(edge.creation_date)));
-		knows_appender->Append<int64_t>(edge.person1_id);
-		knows_appender->Append<int64_t>(edge.person2_id);
-		knows_appender->EndRow();
+		AppendTimestampInt64Int64Row(knows_appender, LdbcTimestampMs(edge.creation_date), edge.person1_id,
+		                             edge.person2_id);
 		row_counts.knows++;
 		if ((edge_idx & 4095) == 0) {
 			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(55.0, 65.0, edge_idx + 1, knows_edges.size()));
@@ -857,11 +933,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			row_counts.forums++;
 
 			for (auto tag_id : forum.tags) {
-				forum_tag_appender->BeginRow();
-				forum_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
-				forum_tag_appender->Append<int64_t>(forum.id);
-				forum_tag_appender->Append<int32_t>(tag_id);
-				forum_tag_appender->EndRow();
+				AppendTimestampInt64Int32Row(forum_tag_appender, LdbcTimestampMs(forum.creation_date), forum.id,
+				                             tag_id);
 				row_counts.forum_tags++;
 			}
 		}
@@ -870,11 +943,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			if (membership.creation_date >= bulkload_threshold) {
 				continue;
 			}
-			forum_member_appender->BeginRow();
-			forum_member_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(membership.creation_date)));
-			forum_member_appender->Append<int64_t>(membership.forum_id);
-			forum_member_appender->Append<int64_t>(membership.person_id);
-			forum_member_appender->EndRow();
+			AppendTimestampInt64Int64Row(forum_member_appender, LdbcTimestampMs(membership.creation_date),
+			                             membership.forum_id, membership.person_id);
 			row_counts.forum_members++;
 		}
 
@@ -898,11 +968,7 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			row_counts.posts++;
 
 			for (auto tag_id : post.tags) {
-				post_tag_appender->BeginRow();
-				post_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
-				post_tag_appender->Append<int64_t>(post.id);
-				post_tag_appender->Append<int32_t>(tag_id);
-				post_tag_appender->EndRow();
+				AppendTimestampInt64Int32Row(post_tag_appender, LdbcTimestampMs(post.creation_date), post.id, tag_id);
 				row_counts.post_tags++;
 			}
 		}
@@ -928,11 +994,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			row_counts.comments++;
 
 			for (auto tag_id : comment.tags) {
-				comment_tag_appender->BeginRow();
-				comment_tag_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
-				comment_tag_appender->Append<int64_t>(comment.id);
-				comment_tag_appender->Append<int32_t>(tag_id);
-				comment_tag_appender->EndRow();
+				AppendTimestampInt64Int32Row(comment_tag_appender, LdbcTimestampMs(comment.creation_date), comment.id,
+				                             tag_id);
 				row_counts.comment_tags++;
 			}
 		}
@@ -941,11 +1004,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			if (like.creation_date >= bulkload_threshold) {
 				continue;
 			}
-			post_like_appender->BeginRow();
-			post_like_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(like.creation_date)));
-			post_like_appender->Append<int64_t>(like.person_id);
-			post_like_appender->Append<int64_t>(like.message_id);
-			post_like_appender->EndRow();
+			AppendTimestampInt64Int64Row(post_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
+			                             like.message_id);
 			row_counts.post_likes++;
 		}
 
@@ -953,11 +1013,8 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 			if (like.creation_date >= bulkload_threshold) {
 				continue;
 			}
-			comment_like_appender->BeginRow();
-			comment_like_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(like.creation_date)));
-			comment_like_appender->Append<int64_t>(like.person_id);
-			comment_like_appender->Append<int64_t>(like.message_id);
-			comment_like_appender->EndRow();
+			AppendTimestampInt64Int64Row(comment_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
+			                             like.message_id);
 			row_counts.comment_likes++;
 		}
 		if ((forum_idx & 255) == 0) {
@@ -966,19 +1023,19 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	}
 	SetLdbcGenProgress(progress_state, 95.0);
 	person_appender->Close();
-	interest_appender->Close();
+	interest_appender.Close();
 	study_appender->Close();
 	work_appender->Close();
-	knows_appender->Close();
+	knows_appender.Close();
 	forum_appender->Close();
-	forum_member_appender->Close();
-	forum_tag_appender->Close();
+	forum_member_appender.Close();
+	forum_tag_appender.Close();
 	post_appender->Close();
-	post_tag_appender->Close();
+	post_tag_appender.Close();
 	comment_appender->Close();
-	comment_tag_appender->Close();
-	post_like_appender->Close();
-	comment_like_appender->Close();
+	comment_tag_appender.Close();
+	post_like_appender.Close();
+	comment_like_appender.Close();
 	return row_counts;
 }
 

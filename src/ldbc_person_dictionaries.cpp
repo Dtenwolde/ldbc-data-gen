@@ -294,7 +294,8 @@ LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, con
 			throw InvalidInputException("Missing IP country abbreviation for '%s'", country_name);
 		}
 
-		auto zone_path = LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
+		auto zone_path =
+		    LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
 		std::ifstream zone_file(zone_path);
 		if (!zone_file.is_open()) {
 			throw IOException("Could not open LDBC IP zone file '%s'", zone_path);
@@ -319,8 +320,7 @@ LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, con
 			if (parser.fail() || mask_bits > 32) {
 				throw InvalidInputException("Malformed IP zone line in '%s': '%s'", zone_path, line);
 			}
-			auto ip = ((byte1 & 0xFFU) << 24U) | ((byte2 & 0xFFU) << 16U) | ((byte3 & 0xFFU) << 8U) |
-			          (byte4 & 0xFFU);
+			auto ip = ((byte1 & 0xFFU) << 24U) | ((byte2 & 0xFFU) << 16U) | ((byte3 & 0xFFU) << 8U) | (byte4 & 0xFFU);
 			auto mask = mask_bits == 0 ? 0U : (0xFFFFFFFFU << (32U - mask_bits));
 			networks.push_back({ip & mask, mask});
 			zone_count++;
@@ -381,8 +381,8 @@ LdbcLanguageDictionary::LdbcLanguageDictionary(const string &dictionary_dir, con
 				continue;
 			}
 			auto language = language_columns[0];
-			auto language_id = NumericCast<int32_t>(std::find(languages.begin(), languages.end(), language) -
-			                                        languages.begin());
+			auto language_id =
+			    NumericCast<int32_t>(std::find(languages.begin(), languages.end(), language) - languages.begin());
 			if (language_id == NumericCast<int32_t>(languages.size())) {
 				languages.push_back(language);
 			}
@@ -742,7 +742,8 @@ LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const
 		auto tag_id = NumericCast<idx_t>(std::stoi(line.substr(0, separator)));
 		auto content_start = separator + 2;
 		auto content_end = line.find("  ", content_start);
-		auto content = content_end == string::npos ? line.substr(content_start) : line.substr(content_start, content_end - content_start);
+		auto content = content_end == string::npos ? line.substr(content_start)
+		                                           : line.substr(content_start, content_end - content_start);
 		if (tag_id >= tag_text.size()) {
 			tag_text.resize(tag_id + 1);
 		}
@@ -750,9 +751,8 @@ LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const
 	}
 }
 
-int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size,
-                                                 LdbcJavaRandom &random_reduced_text, int32_t min_size,
-                                                 int32_t max_size, double reduced_text_ratio) const {
+int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size, LdbcJavaRandom &random_reduced_text,
+                                                 int32_t min_size, int32_t max_size, double reduced_text_ratio) const {
 	if (random_reduced_text.NextDouble() > reduced_text_ratio) {
 		return random_text_size.NextInt(max_size - min_size) + min_size;
 	}
@@ -953,10 +953,10 @@ LdbcUniversityDictionary::LdbcUniversityDictionary(const string &dictionary_dir,
 }
 
 int32_t LdbcUniversityDictionary::GetRandomUniversityLocation(LdbcJavaRandom &random_uncorrelated_university,
-                                                             LdbcJavaRandom &random_uncorrelated_location,
-                                                             LdbcJavaRandom &random_top_university,
-                                                             LdbcJavaRandom &random_university,
-                                                             int32_t country_id) const {
+                                                              LdbcJavaRandom &random_uncorrelated_location,
+                                                              LdbcJavaRandom &random_top_university,
+                                                              LdbcJavaRandom &random_university,
+                                                              int32_t country_id) const {
 	auto probability = random_uncorrelated_university.NextDouble();
 	auto &countries = places.GetCountries();
 	if (random_uncorrelated_university.NextDouble() <= prob_uncorrelated_university) {
@@ -995,8 +995,7 @@ LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, doubl
       tag_matrix(LdbcResourcePath(resource_dir, "dictionaries")),
       companies(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_company),
       universities(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_university,
-                   prob_top_university,
-                   NumericCast<int64_t>(companies.GetCompanyCount())) {
+                   prob_top_university, NumericCast<int64_t>(companies.GetCompanyCount())) {
 }
 
 } // namespace duckdb
