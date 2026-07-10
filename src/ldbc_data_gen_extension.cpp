@@ -24,6 +24,7 @@
 #include "duckdb/catalog/catalog_search_path.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/sql_identifier.hpp"
+#include "duckdb/parallel/task_executor.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/query_result.hpp"
 #include "duckdb/planner/binder.hpp"
@@ -205,6 +206,7 @@ struct LdbcGenBindData : public TableFunctionData {
 	string schema = "main";
 	string format = "parquet";
 	string dictionary_dir = "third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries";
+	idx_t threads = 1;
 	bool overwrite = false;
 	bool primary_keys = false;
 };
@@ -1328,25 +1330,84 @@ private:
 
 	bool GeneratePersons() {
 		EnsureDynamicState();
-		if (!person_generator) {
-			person_generator = make_uniq<LdbcPersonGenerator>(*config);
-			persons.reserve(NumericCast<idx_t>(config->num_persons));
+		if (!persons_initialized) {
+			persons.resize(NumericCast<idx_t>(config->num_persons));
+			persons_initialized = true;
 		}
 		LdbcProfileTimer timer("generate.persons");
-		static constexpr idx_t PERSON_GENERATION_BATCH_SIZE = 256;
-		auto end = std::min<int64_t>(config->num_persons,
-		                             NumericCast<int64_t>(persons.size() + PERSON_GENERATION_BATCH_SIZE));
-		for (int64_t sequential_id = NumericCast<int64_t>(persons.size()); sequential_id < end; sequential_id++) {
-			persons.push_back(person_generator->GenerateCore(sequential_id));
+		auto block_size = NumericCast<idx_t>(config->block_size);
+		auto total_blocks = (persons.size() + block_size - 1) / block_size;
+		auto worker_count = MinValue<idx_t>(bind_data.threads, MaxValue<idx_t>(total_blocks - person_next_block, 1));
+		auto blocks_this_round = MinValue<idx_t>(total_blocks - person_next_block, worker_count);
+		if (blocks_this_round == 0) {
+			SetLdbcGenProgress(&progress_state, 25.0);
+			return true;
 		}
-		SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(20.0, 25.0, persons.size(),
-		                                                         NumericCast<idx_t>(config->num_persons)));
-		if (persons.size() >= NumericCast<idx_t>(config->num_persons)) {
-			person_generator.reset();
+		auto block_start = person_next_block;
+		auto block_end = block_start + blocks_this_round;
+
+		if (worker_count <= 1) {
+			GeneratePersonBlocks(block_start, block_end);
+		} else {
+			class LdbcPersonBlockTask : public BaseExecutorTask {
+			public:
+				LdbcPersonBlockTask(TaskExecutor &executor, LdbcLoadGenerator &loader, std::atomic<idx_t> &next_block,
+				                    idx_t block_end)
+				    : BaseExecutorTask(executor), loader(loader), next_block(next_block), block_end(block_end) {
+				}
+
+				void ExecuteTask() override {
+					LdbcPersonGenerator generator(*loader.config);
+					while (true) {
+						auto block_id = next_block.fetch_add(1);
+						if (block_id >= block_end) {
+							break;
+						}
+						loader.GeneratePersonBlock(generator, block_id);
+					}
+				}
+
+				string TaskType() const override {
+					return "LdbcPersonBlockTask";
+				}
+
+			private:
+				LdbcLoadGenerator &loader;
+				std::atomic<idx_t> &next_block;
+				idx_t block_end;
+			};
+
+			std::atomic<idx_t> next_block(block_start);
+			TaskExecutor executor(context);
+			for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
+				executor.ScheduleTask(make_uniq<LdbcPersonBlockTask>(executor, *this, next_block, block_end));
+			}
+			executor.WorkOnTasks();
+		}
+
+		person_next_block = block_end;
+		SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(20.0, 25.0, person_next_block, total_blocks));
+		if (person_next_block >= total_blocks) {
 			SetLdbcGenProgress(&progress_state, 25.0);
 			return true;
 		}
 		return false;
+	}
+
+	void GeneratePersonBlocks(idx_t block_start, idx_t block_end) {
+		LdbcPersonGenerator generator(*config);
+		for (idx_t block_id = block_start; block_id < block_end; block_id++) {
+			GeneratePersonBlock(generator, block_id);
+		}
+	}
+
+	void GeneratePersonBlock(LdbcPersonGenerator &generator, idx_t block_id) {
+		auto block_size = NumericCast<idx_t>(config->block_size);
+		auto start = block_id * block_size;
+		auto end = std::min<idx_t>(persons.size(), start + block_size);
+		for (idx_t sequential_id = start; sequential_id < end; sequential_id++) {
+			persons[sequential_id] = generator.GenerateCore(NumericCast<int64_t>(sequential_id));
+		}
 	}
 
 	bool AppendPersons() {
@@ -1403,10 +1464,10 @@ private:
 
 	bool GenerateKnows() {
 		if (!knows_generator) {
-			knows_generator = make_uniq<LdbcKnowsGenerator>(*config, persons);
+			knows_generator = make_uniq<LdbcKnowsGenerator>(*config, persons, bind_data.threads, &context);
 		}
 		LdbcProfileTimer timer("generate.knows");
-		auto done = knows_generator->GenerateNext(4);
+		auto done = knows_generator->GenerateNext(MaxValue<idx_t>(4, bind_data.threads));
 		SetLdbcGenProgress(&progress_state,
 		                   LdbcGenProgressRange(45.0, 55.0, static_cast<idx_t>(knows_generator->Progress()), 100));
 		if (done) {
@@ -1442,7 +1503,8 @@ private:
 			forum_generator = make_uniq<LdbcForumGenerator>(
 			    *config, persons, knows_edges, append_forum, [&](idx_t done, idx_t total) {
 				    SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
-			    });
+			    },
+			    bind_data.threads, &context);
 		}
 		LdbcProfileTimer timer("generate.forums.batch");
 		auto done = forum_generator->GenerateNext(8);
@@ -1583,9 +1645,10 @@ private:
 	int64_t bulkload_threshold = 0;
 	vector<LdbcPersonCore> persons;
 	vector<LdbcKnowsEdge> knows_edges;
+	bool persons_initialized = false;
+	idx_t person_next_block = 0;
 	idx_t person_idx = 0;
 	idx_t knows_idx = 0;
-	unique_ptr<LdbcPersonGenerator> person_generator;
 	unique_ptr<LdbcKnowsGenerator> knows_generator;
 	unique_ptr<LdbcForumGenerator> forum_generator;
 
@@ -1796,12 +1859,17 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	result->schema = GetStringParameter(input, "schema", result->schema);
 	result->format = StringUtil::Lower(GetStringParameter(input, "format", "parquet"));
 	result->dictionary_dir = GetStringParameter(input, "dictionary_dir", result->dictionary_dir);
+	auto threads = GetBigIntParameter(input, "threads", NumericCast<int64_t>(result->threads));
 	result->overwrite = GetBooleanParameter(input, "overwrite", false);
 	result->primary_keys = GetBooleanParameter(input, "primary_keys", false);
 
 	if (result->scale_factor <= 0) {
 		throw BinderException("ldbcgen parameter sf must be greater than zero");
 	}
+	if (threads <= 0) {
+		throw BinderException("ldbcgen parameter threads must be greater than zero");
+	}
+	result->threads = UnsafeNumericCast<idx_t>(threads);
 	if (result->target != "tables" && result->target != "files") {
 		throw BinderException("ldbcgen parameter target must be either 'tables' or 'files'");
 	}
@@ -2431,6 +2499,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	ldbcgen.named_parameters["schema"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["format"] = LogicalType::VARCHAR;
 	ldbcgen.named_parameters["dictionary_dir"] = LogicalType::VARCHAR;
+	ldbcgen.named_parameters["threads"] = LogicalType::BIGINT;
 	ldbcgen.named_parameters["overwrite"] = LogicalType::BOOLEAN;
 	ldbcgen.named_parameters["primary_keys"] = LogicalType::BOOLEAN;
 	ldbcgen.table_scan_progress = LdbcGenProgress;

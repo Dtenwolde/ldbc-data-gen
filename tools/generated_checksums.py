@@ -86,6 +86,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--fixture", type=Path, default=root / "test/fixtures/ldbc_snb_bi_static_schema.json")
     parser.add_argument("--schema", default="ldbc_generated_checksums")
     parser.add_argument("--sf", type=float, default=0.003)
+    parser.add_argument("--threads", type=int, default=1)
     args = parser.parse_args(argv)
 
     if not args.duckdb.exists():
@@ -98,7 +99,8 @@ def main(argv: list[str]) -> int:
         database = Path(tmpdir) / "checksums.duckdb"
         setup_sql = (
             f"LOAD {sql_string(args.extension)}; "
-            f"CALL ldbcgen(sf := {args.sf}, schema := {sql_string(args.schema)}, overwrite := true);"
+            f"CALL ldbcgen(sf := {args.sf}, schema := {sql_string(args.schema)}, "
+            f"threads := {args.threads}, overwrite := true);"
         )
         run_duckdb(args.duckdb, database, setup_sql)
 

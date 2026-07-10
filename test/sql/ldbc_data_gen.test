@@ -231,6 +231,19 @@ Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
 
+# Confirm threaded person-core generation preserves deterministic row counts.
+query TI
+SELECT relation_name, row_count
+FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts_threads4', threads := 4)
+WHERE relation_name IN ('Person', 'Person_hasInterest_Tag', 'Person_knows_Person', 'Post', 'Comment')
+ORDER BY relation_name;
+----
+Comment	471
+Person	50
+Person_hasInterest_Tag	1256
+Person_knows_Person	83
+Post	3189
+
 # Confirm the CALL contract creates DuckDB tables.
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');

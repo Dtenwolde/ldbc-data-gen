@@ -14,6 +14,8 @@
 
 namespace duckdb {
 
+class ClientContext;
+
 enum class LdbcRandomAspect : uint8_t {
 	DATE = 0,
 	BIRTH_DAY = 1,
@@ -274,7 +276,8 @@ vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
 
 class LdbcKnowsGenerator {
 public:
-	LdbcKnowsGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
+	LdbcKnowsGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons, idx_t threads = 1,
+	                   ClientContext *context = nullptr);
 	~LdbcKnowsGenerator();
 
 	bool GenerateNext(idx_t max_blocks = 1);
@@ -286,14 +289,16 @@ private:
 	unique_ptr<Impl> impl;
 };
 
-vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
+vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
+                                        idx_t threads = 1, ClientContext *context = nullptr);
 
 class LdbcForumGenerator {
 public:
 	LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
 	                   const vector<LdbcKnowsEdge> &knows_edges,
 	                   const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
-	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr);
+	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr, idx_t threads = 1,
+	                   ClientContext *context = nullptr);
 	~LdbcForumGenerator();
 
 	bool GenerateNext(idx_t max_persons = 1);
@@ -308,7 +313,8 @@ private:
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
                                      const vector<LdbcKnowsEdge> &knows_edges,
                                      const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
-                                     const std::function<void(idx_t done, idx_t total)> &progress = nullptr);
+                                     const std::function<void(idx_t done, idx_t total)> &progress = nullptr,
+                                     idx_t threads = 1, ClientContext *context = nullptr);
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms);
 date_t LdbcDateFromEpochMs(int64_t epoch_ms);
