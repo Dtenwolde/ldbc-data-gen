@@ -10,7 +10,7 @@ The pinned source of truth for the first milestone is the Spark-based LDBC SNB D
 third_party/ldbc_snb_datagen_spark
 ```
 
-The initial target is BI static output parity. Incremental update generation and the Interactive workload are intentionally out of scope until the static BI parity harness is in place.
+The current target is Spark-compatible SNB BI output for the default `composite-merged-fk` layout. The Interactive workload remains out of scope.
 
 ## Current API
 
@@ -29,7 +29,7 @@ CALL ldbcgen(
 );
 ```
 
-The current implementation validates parameters and generates the BI static initial snapshot relations either as DuckDB tables or as files.
+The current implementation validates parameters and generates the BI initial snapshot relations either as DuckDB tables or as files. File output also emits Spark-compatible BI insert and delete batches.
 
 Returned columns:
 
@@ -60,10 +60,10 @@ Schema-only metadata is available through:
 ```sql
 SELECT *
 FROM ldbcgen_schema(format := 'parquet')
-ORDER BY relation_name, column_index;
+ORDER BY relation_name, operation, column_index;
 ```
 
-This returns one row per BI static snapshot column, including `relation_name`, `entity_path`, `kind`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`.
+This returns one row per BI column, including `relation_name`, `entity_path`, `kind`, `operation`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`. `operation` is one of `initial_snapshot`, `inserts`, or `deletes`.
 
 ## Reference Scope
 
@@ -80,7 +80,7 @@ graphs/parquet/bi/composite-merged-fk/
 graphs/csv/bi/composite-merged-fk/
 ```
 
-Static and bulk-load data is written under `initial_snapshot/`. Incremental `inserts/` and `deletes/` exist in the Spark generator, but are deferred here.
+Static and bulk-load data is written under `initial_snapshot/`. File output also writes dynamic `inserts/` and the Spark-default explicit `deletes/` relations.
 
 The committed first-pass schema inventory lives in:
 
@@ -96,7 +96,7 @@ Run the fixture checker:
 python3 tools/validate_ldbc_fixture.py test/fixtures/ldbc_snb_bi_static_schema.json
 ```
 
-This check is Spark-free and CI-safe. It validates the pinned upstream commit metadata, relation inventory shape, primary keys, initial snapshot paths, and column definitions. Later generator chunks should extend this harness with row counts, stable checksums, and referential-integrity checks against generated `sf=0.003` Spark reference output.
+This check is Spark-free and CI-safe. It validates the pinned upstream commit metadata, relation inventory shape, primary keys, initial snapshot paths, and column definitions.
 
 Generated data should stay out of git. Use ignored directories such as `out/`, `generated/`, or `reference_data/`.
 
@@ -121,6 +121,12 @@ python3 tools/dynamic_parity.py
 
 This currently covers `Person`, `Person_hasInterest_Tag`, `Person_studyAt_University`,
 `Person_workAt_Company`, and `Person_knows_Person`.
+
+Compare all BI initial snapshot relations against Spark reference output:
+
+```sh
+python3 tools/bi_snapshot_parity.py
+```
 
 Compare BI insert/delete batches against Spark reference output:
 

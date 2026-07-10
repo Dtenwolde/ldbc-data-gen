@@ -565,28 +565,39 @@ query I
 SELECT COUNT(*)
 FROM ldbcgen_schema();
 ----
-86
+196
 
-query TTTTTTTT
-SELECT entity_path, kind, snapshot_path, column_index, column_name, nullable, logical_type, primary_key
+query TTTTTTTTT
+SELECT entity_path, kind, operation, snapshot_path, column_index, column_name, nullable, logical_type, primary_key
 FROM ldbcgen_schema(format := 'csv')
-WHERE relation_name = 'Post'
+WHERE relation_name = 'Post' AND operation = 'initial_snapshot'
 ORDER BY column_index
 LIMIT 3;
 ----
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	0	creationDate	false	TIMESTAMP_MS	id
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	1	id	false	BIGINT	id
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	2	imageFile	true	VARCHAR	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	0	creationDate	false	TIMESTAMP_MS	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	1	id	false	BIGINT	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	2	imageFile	true	VARCHAR	id
 
 query TTT
 SELECT column_name, logical_type, primary_key
 FROM ldbcgen_schema()
-WHERE relation_name = 'Person_knows_Person'
+WHERE relation_name = 'Person_knows_Person' AND operation = 'initial_snapshot'
 ORDER BY column_index;
 ----
 creationDate	TIMESTAMP_MS	Person1Id,Person2Id
 Person1Id	BIGINT	Person1Id,Person2Id
 Person2Id	BIGINT	Person1Id,Person2Id
+
+query TTTT
+SELECT operation, column_name, logical_type, snapshot_path
+FROM ldbcgen_schema()
+WHERE relation_name = 'Person_likes_Comment' AND operation = 'deletes'
+ORDER BY column_index;
+----
+deletes	batch_id	DATE	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	deletionDate	TIMESTAMP_MS	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	PersonId	BIGINT	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	CommentId	BIGINT	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
 
 statement error
 SELECT * FROM ldbcgen_schema(format := 'json');

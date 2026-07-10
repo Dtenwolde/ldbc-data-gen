@@ -2566,6 +2566,8 @@ static unique_ptr<FunctionData> LdbcGenSchemaBind(ClientContext &context, TableF
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("kind");
 	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("operation");
+	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("snapshot_path");
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("column_index");
@@ -2582,6 +2584,93 @@ static unique_ptr<FunctionData> LdbcGenSchemaBind(ClientContext &context, TableF
 	return std::move(result);
 }
 
+struct LdbcSchemaMetadataRow {
+	string relation_name;
+	string entity_path;
+	string kind;
+	string operation;
+	string path;
+	idx_t column_index;
+	string column_name;
+	string logical_type;
+	bool nullable;
+	string primary_key;
+};
+
+static void AddLdbcSchemaMetadataRow(vector<LdbcSchemaMetadataRow> &rows, const LdbcSchemaColumn &relation,
+                                     const string &operation, const string &path, idx_t column_index,
+                                     const string &column_name, const string &logical_type, bool nullable) {
+	rows.push_back({relation.relation_name, relation.entity_path, relation.kind, operation, path, column_index,
+	                column_name, logical_type, nullable, relation.primary_key});
+}
+
+static vector<LdbcSchemaMetadataRow> BuildLdbcSchemaMetadataRows(const string &format) {
+	vector<LdbcSchemaMetadataRow> rows;
+	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
+		auto &relation = LdbcRelationAt(relation_index);
+		auto relation_name = string(relation.relation_name);
+		auto entity_path = string(relation.entity_path);
+		auto snapshot_path = "graphs/" + format + "/bi/composite-merged-fk/initial_snapshot/" + entity_path;
+		idx_t row_idx = 0;
+		while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != relation_name) {
+			row_idx++;
+		}
+		idx_t column_index = 0;
+		while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) == relation_name) {
+			auto &column = LDBC_BI_STATIC_SCHEMA[row_idx];
+			AddLdbcSchemaMetadataRow(rows, relation, "initial_snapshot", snapshot_path, column_index++,
+			                         column.column_name, column.logical_type, column.nullable);
+			row_idx++;
+		}
+		if (string(relation.kind) == "static_node") {
+			continue;
+		}
+
+		auto insert_path = "graphs/" + format + "/bi/composite-merged-fk/inserts/" + entity_path;
+		AddLdbcSchemaMetadataRow(rows, relation, "inserts", insert_path, 0, "batch_id", "DATE", false);
+		row_idx = 0;
+		while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != relation_name) {
+			row_idx++;
+		}
+		column_index = 1;
+		while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) == relation_name) {
+			auto &column = LDBC_BI_STATIC_SCHEMA[row_idx];
+			AddLdbcSchemaMetadataRow(rows, relation, "inserts", insert_path, column_index++, column.column_name,
+			                         column.logical_type, column.nullable);
+			row_idx++;
+		}
+
+		if (!LdbcRelationHasDeletes(relation_name)) {
+			continue;
+		}
+		auto delete_path = "graphs/" + format + "/bi/composite-merged-fk/deletes/" + entity_path;
+		AddLdbcSchemaMetadataRow(rows, relation, "deletes", delete_path, 0, "batch_id", "DATE", false);
+		AddLdbcSchemaMetadataRow(rows, relation, "deletes", delete_path, 1, "deletionDate", "TIMESTAMP_MS", false);
+		column_index = 2;
+		for (auto &key : SplitByDelimiter(relation.primary_key, ",")) {
+			row_idx = 0;
+			while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != relation_name) {
+				row_idx++;
+			}
+			bool found = false;
+			while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) == relation_name) {
+				auto &column = LDBC_BI_STATIC_SCHEMA[row_idx];
+				if (key == column.column_name) {
+					AddLdbcSchemaMetadataRow(rows, relation, "deletes", delete_path, column_index++, column.column_name,
+					                         column.logical_type, false);
+					found = true;
+					break;
+				}
+				row_idx++;
+			}
+			if (!found) {
+				throw InternalException("Could not resolve primary key column %s for relation %s", key, relation_name);
+			}
+		}
+	}
+	return rows;
+}
+
 static unique_ptr<GlobalTableFunctionState> LdbcGenSchemaInit(ClientContext &context, TableFunctionInitInput &input) {
 	return make_uniq<LdbcGenSchemaGlobalState>();
 }
@@ -2590,41 +2679,19 @@ static void LdbcGenSchemaFunction(ClientContext &context, TableFunctionInput &da
 	auto &bind_data = data_p.bind_data->Cast<LdbcGenSchemaBindData>();
 	auto &state = data_p.global_state->Cast<LdbcGenSchemaGlobalState>();
 	idx_t count = 0;
-	idx_t column_index = 0;
-	const char *previous_relation = nullptr;
-
-	for (idx_t row_idx = 0; row_idx < state.offset; row_idx++) {
-		auto &row = LDBC_BI_STATIC_SCHEMA[row_idx];
-		if (!previous_relation || string(previous_relation) != row.relation_name) {
-			previous_relation = row.relation_name;
-			column_index = 0;
-		} else {
-			column_index++;
-		}
-	}
-
-	for (idx_t row_idx = state.offset;
-	     row_idx < sizeof(LDBC_BI_STATIC_SCHEMA) / sizeof(LDBC_BI_STATIC_SCHEMA[0]) && count < STANDARD_VECTOR_SIZE;
-	     row_idx++) {
-		auto &row = LDBC_BI_STATIC_SCHEMA[row_idx];
-		if (!previous_relation || string(previous_relation) != row.relation_name) {
-			previous_relation = row.relation_name;
-			column_index = 0;
-		} else {
-			column_index++;
-		}
-
-		string snapshot_path =
-		    "graphs/" + bind_data.format + "/bi/composite-merged-fk/initial_snapshot/" + string(row.entity_path);
+	auto rows = BuildLdbcSchemaMetadataRows(bind_data.format);
+	for (idx_t row_idx = state.offset; row_idx < rows.size() && count < STANDARD_VECTOR_SIZE; row_idx++) {
+		auto &row = rows[row_idx];
 		output.data[0].SetValue(count, row.relation_name);
 		output.data[1].SetValue(count, row.entity_path);
 		output.data[2].SetValue(count, row.kind);
-		output.data[3].SetValue(count, snapshot_path);
-		output.data[4].SetValue(count, Value::INTEGER(NumericCast<int32_t>(column_index)));
-		output.data[5].SetValue(count, row.column_name);
-		output.data[6].SetValue(count, row.logical_type);
-		output.data[7].SetValue(count, Value::BOOLEAN(row.nullable));
-		output.data[8].SetValue(count, row.primary_key);
+		output.data[3].SetValue(count, row.operation);
+		output.data[4].SetValue(count, row.path);
+		output.data[5].SetValue(count, Value::INTEGER(NumericCast<int32_t>(row.column_index)));
+		output.data[6].SetValue(count, row.column_name);
+		output.data[7].SetValue(count, row.logical_type);
+		output.data[8].SetValue(count, Value::BOOLEAN(row.nullable));
+		output.data[9].SetValue(count, row.primary_key);
 		count++;
 	}
 
