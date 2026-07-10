@@ -9,6 +9,7 @@
 #include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/common/exception.hpp"
+#include "duckdb/common/vector/string_vector.hpp"
 #include "duckdb/common/vector_operations/unary_executor.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include "duckdb/function/table_function.hpp"
@@ -25,6 +26,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/sql_identifier.hpp"
 #include "duckdb/parallel/task_executor.hpp"
+#include "duckdb/parallel/task_scheduler.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/query_result.hpp"
 #include "duckdb/planner/binder.hpp"
@@ -682,7 +684,9 @@ public:
 	}
 
 	void AppendTimestamp(idx_t column, idx_t row_index, timestamp_t value) {
-		FlatVector::GetDataMutable<timestamp_t>(chunk.data[column])[row_index] = value;
+		FlatVector::GetDataMutable<timestamp_ms_t>(chunk.data[column])[row_index] =
+		    timestamp_ms_t(Timestamp::GetEpochMs(value));
+		FlatVector::SetNull(chunk.data[column], row_index, false);
 	}
 
 	void AppendInt32(idx_t column, idx_t row_index, int32_t value) {
@@ -691,6 +695,17 @@ public:
 
 	void AppendInt64(idx_t column, idx_t row_index, int64_t value) {
 		FlatVector::GetDataMutable<int64_t>(chunk.data[column])[row_index] = value;
+		FlatVector::SetNull(chunk.data[column], row_index, false);
+	}
+
+	void AppendString(idx_t column, idx_t row_index, const string &value) {
+		FlatVector::GetDataMutable<string_t>(chunk.data[column])[row_index] =
+		    StringVector::AddStringOrBlob(chunk.data[column], value);
+		FlatVector::SetNull(chunk.data[column], row_index, false);
+	}
+
+	void AppendNull(idx_t column, idx_t row_index) {
+		FlatVector::SetNull(chunk.data[column], row_index, true);
 	}
 
 	idx_t CurrentRow() const {
@@ -738,6 +753,22 @@ static LdbcChunkAppender MakeTimestampInt64Int32Appender(ClientContext &context,
 	                         {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
 }
 
+static unique_ptr<LdbcChunkAppender> MakePostAppender(ClientContext &context, const LdbcGenBindData &bind_data) {
+	return make_uniq<LdbcChunkAppender>(
+	    MakeStaticAppender(context, bind_data, "Post"),
+	    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::VARCHAR,
+	                         LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER,
+	                         LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT});
+}
+
+static unique_ptr<LdbcChunkAppender> MakeCommentAppender(ClientContext &context, const LdbcGenBindData &bind_data) {
+	return make_uniq<LdbcChunkAppender>(
+	    MakeStaticAppender(context, bind_data, "Comment"),
+	    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::VARCHAR,
+	                         LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::INTEGER,
+	                         LogicalType::BIGINT, LogicalType::BIGINT});
+}
+
 static void AppendTimestampInt64Int64Row(LdbcChunkAppender &appender, timestamp_t creation_date, int64_t id1,
                                          int64_t id2) {
 	auto row = appender.CurrentRow();
@@ -753,6 +784,57 @@ static void AppendTimestampInt64Int32Row(LdbcChunkAppender &appender, timestamp_
 	appender.AppendTimestamp(0, row, creation_date);
 	appender.AppendInt64(1, row, id1);
 	appender.AppendInt32(2, row, id2);
+	appender.EndRow();
+}
+
+static void AppendPostRow(LdbcChunkAppender &appender, const LdbcPost &post) {
+	auto row = appender.CurrentRow();
+	appender.AppendTimestamp(0, row, LdbcTimestampMs(post.creation_date));
+	appender.AppendInt64(1, row, post.id);
+	if (post.image_file.empty()) {
+		appender.AppendNull(2, row);
+	} else {
+		appender.AppendString(2, row, post.image_file);
+	}
+	appender.AppendString(3, row, post.location_ip);
+	appender.AppendString(4, row, post.browser_used);
+	if (post.language.empty()) {
+		appender.AppendNull(5, row);
+	} else {
+		appender.AppendString(5, row, post.language);
+	}
+	if (post.image_file.empty()) {
+		appender.AppendString(6, row, post.content);
+	} else {
+		appender.AppendNull(6, row);
+	}
+	appender.AppendInt32(7, row, post.length);
+	appender.AppendInt64(8, row, post.creator_person_id);
+	appender.AppendInt64(9, row, post.forum_id);
+	appender.AppendInt64(10, row, post.location_country_id);
+	appender.EndRow();
+}
+
+static void AppendCommentRow(LdbcChunkAppender &appender, const LdbcComment &comment) {
+	auto row = appender.CurrentRow();
+	appender.AppendTimestamp(0, row, LdbcTimestampMs(comment.creation_date));
+	appender.AppendInt64(1, row, comment.id);
+	appender.AppendString(2, row, comment.location_ip);
+	appender.AppendString(3, row, comment.browser_used);
+	appender.AppendString(4, row, comment.content);
+	appender.AppendInt32(5, row, comment.length);
+	appender.AppendInt64(6, row, comment.creator_person_id);
+	appender.AppendInt32(7, row, comment.location_country_id);
+	if (comment.parent_post_id == -1) {
+		appender.AppendNull(8, row);
+	} else {
+		appender.AppendInt64(8, row, comment.parent_post_id);
+	}
+	if (comment.parent_comment_id == -1) {
+		appender.AppendNull(9, row);
+	} else {
+		appender.AppendInt64(9, row, comment.parent_comment_id);
+	}
 	appender.EndRow();
 }
 
@@ -1265,6 +1347,7 @@ private:
 		    dates->SimulationEnd() -
 		    static_cast<int64_t>(static_cast<double>(dates->SimulationEnd() - dates->SimulationStart()) *
 		                         (1.0 - config->bulkload_portion));
+		chunk_message_appenders = std::getenv("LDBCGEN_ROW_MESSAGES") == nullptr;
 
 		person_appender = MakeStaticAppender(context, bind_data, "Person");
 		interest_appender = make_uniq<LdbcChunkAppender>(
@@ -1282,11 +1365,19 @@ private:
 		forum_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
-		post_appender = MakeStaticAppender(context, bind_data, "Post");
+		if (chunk_message_appenders) {
+			post_chunk_appender = MakePostAppender(context, bind_data);
+		} else {
+			post_appender = MakeStaticAppender(context, bind_data, "Post");
+		}
 		post_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Post_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
-		comment_appender = MakeStaticAppender(context, bind_data, "Comment");
+		if (chunk_message_appenders) {
+			comment_chunk_appender = MakeCommentAppender(context, bind_data);
+		} else {
+			comment_appender = MakeStaticAppender(context, bind_data, "Comment");
+		}
 		comment_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Comment_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
@@ -1540,19 +1631,23 @@ private:
 			if (post.creation_date >= bulkload_threshold) {
 				continue;
 			}
-			post_appender->BeginRow();
-			post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
-			post_appender->Append<int64_t>(post.id);
-			post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
-			post_appender->Append(Value(post.location_ip));
-			post_appender->Append(Value(post.browser_used));
-			post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
-			post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
-			post_appender->Append<int32_t>(post.length);
-			post_appender->Append<int64_t>(post.creator_person_id);
-			post_appender->Append<int64_t>(post.forum_id);
-			post_appender->Append<int64_t>(post.location_country_id);
-			post_appender->EndRow();
+			if (chunk_message_appenders) {
+				AppendPostRow(*post_chunk_appender, post);
+			} else {
+				post_appender->BeginRow();
+				post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
+				post_appender->Append<int64_t>(post.id);
+				post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
+				post_appender->Append(Value(post.location_ip));
+				post_appender->Append(Value(post.browser_used));
+				post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
+				post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
+				post_appender->Append<int32_t>(post.length);
+				post_appender->Append<int64_t>(post.creator_person_id);
+				post_appender->Append<int64_t>(post.forum_id);
+				post_appender->Append<int64_t>(post.location_country_id);
+				post_appender->EndRow();
+			}
 			person_counts.posts++;
 			for (auto tag_id : post.tags) {
 				AppendTimestampInt64Int32Row(*post_tag_appender, LdbcTimestampMs(post.creation_date), post.id, tag_id);
@@ -1563,20 +1658,24 @@ private:
 			if (comment.creation_date >= bulkload_threshold) {
 				continue;
 			}
-			comment_appender->BeginRow();
-			comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
-			comment_appender->Append<int64_t>(comment.id);
-			comment_appender->Append(Value(comment.location_ip));
-			comment_appender->Append(Value(comment.browser_used));
-			comment_appender->Append(Value(comment.content));
-			comment_appender->Append<int32_t>(comment.length);
-			comment_appender->Append<int64_t>(comment.creator_person_id);
-			comment_appender->Append<int64_t>(comment.location_country_id);
-			comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
-			                                                      : Value::BIGINT(comment.parent_post_id));
-			comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
-			                                                         : Value::BIGINT(comment.parent_comment_id));
-			comment_appender->EndRow();
+			if (chunk_message_appenders) {
+				AppendCommentRow(*comment_chunk_appender, comment);
+			} else {
+				comment_appender->BeginRow();
+				comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
+				comment_appender->Append<int64_t>(comment.id);
+				comment_appender->Append(Value(comment.location_ip));
+				comment_appender->Append(Value(comment.browser_used));
+				comment_appender->Append(Value(comment.content));
+				comment_appender->Append<int32_t>(comment.length);
+				comment_appender->Append<int64_t>(comment.creator_person_id);
+				comment_appender->Append<int64_t>(comment.location_country_id);
+				comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
+				                                                      : Value::BIGINT(comment.parent_post_id));
+				comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
+				                                                         : Value::BIGINT(comment.parent_comment_id));
+				comment_appender->EndRow();
+			}
 			person_counts.comments++;
 			for (auto tag_id : comment.tags) {
 				AppendTimestampInt64Int32Row(*comment_tag_appender, LdbcTimestampMs(comment.creation_date), comment.id,
@@ -1611,9 +1710,17 @@ private:
 		forum_appender->Close();
 		forum_member_appender->Close();
 		forum_tag_appender->Close();
-		post_appender->Close();
+		if (chunk_message_appenders) {
+			post_chunk_appender->Close();
+		} else {
+			post_appender->Close();
+		}
 		post_tag_appender->Close();
-		comment_appender->Close();
+		if (chunk_message_appenders) {
+			comment_chunk_appender->Close();
+		} else {
+			comment_appender->Close();
+		}
 		comment_tag_appender->Close();
 		post_like_appender->Close();
 		comment_like_appender->Close();
@@ -1660,9 +1767,12 @@ private:
 	unique_ptr<InternalAppender> forum_appender;
 	unique_ptr<LdbcChunkAppender> forum_member_appender;
 	unique_ptr<LdbcChunkAppender> forum_tag_appender;
+	bool chunk_message_appenders = false;
 	unique_ptr<InternalAppender> post_appender;
+	unique_ptr<LdbcChunkAppender> post_chunk_appender;
 	unique_ptr<LdbcChunkAppender> post_tag_appender;
 	unique_ptr<InternalAppender> comment_appender;
+	unique_ptr<LdbcChunkAppender> comment_chunk_appender;
 	unique_ptr<LdbcChunkAppender> comment_tag_appender;
 	unique_ptr<LdbcChunkAppender> post_like_appender;
 	unique_ptr<LdbcChunkAppender> comment_like_appender;
@@ -1852,6 +1962,7 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	auto result = make_uniq<LdbcGenBindData>();
 	result->catalog = DatabaseManager::GetDefaultDatabase(context).GetIdentifierName();
 	result->schema = ClientData::Get(context).catalog_search_path->GetDefault().GetSchema().GetIdentifierName();
+	result->threads = MaxValue<idx_t>(TaskScheduler::GetScheduler(context).NumberOfThreads(), 1);
 	result->scale_factor = GetDoubleParameter(input, "sf", 1.0);
 	result->catalog = GetStringParameter(input, "catalog", result->catalog);
 	result->output_dir = GetStringParameter(input, "output_dir", "");
