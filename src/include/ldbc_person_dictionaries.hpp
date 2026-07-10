@@ -146,6 +146,10 @@ public:
 private:
 	const LdbcTagDictionary &tags;
 	vector<string> tag_text;
+	vector<int32_t> tag_text_lengths;
+	vector<bool> tag_text_bmp_only;
+	vector<string> tag_prefixes;
+	vector<int32_t> tag_prefix_lengths;
 };
 
 class LdbcTagMatrix {

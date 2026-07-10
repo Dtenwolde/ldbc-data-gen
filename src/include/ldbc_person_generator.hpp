@@ -8,6 +8,7 @@
 #include "duckdb/common/types/timestamp.hpp"
 
 #include <array>
+#include <functional>
 #include <unordered_map>
 
 namespace duckdb {
@@ -271,7 +272,8 @@ private:
 vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
 vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
-                                     const vector<LdbcKnowsEdge> &knows_edges);
+                                     const vector<LdbcKnowsEdge> &knows_edges,
+                                     const std::function<void(idx_t done, idx_t total)> &progress = nullptr);
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms);
 date_t LdbcDateFromEpochMs(int64_t epoch_ms);

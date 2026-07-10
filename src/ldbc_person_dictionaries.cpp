@@ -54,6 +54,16 @@ static string TrimWhitespaceLocal(const string &value) {
 	return value.substr(start, end - start);
 }
 
+static bool IsBmpOnlyUtf8(const string &value) {
+	for (auto character : value) {
+		auto byte = static_cast<unsigned char>(character);
+		if ((byte & 0xF8U) == 0xF0U) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static vector<string> SplitByDelimiterLocal(const string &line, const string &delimiter) {
 	vector<string> result;
 	idx_t offset = 0;
@@ -749,6 +759,29 @@ LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const
 		}
 		tag_text[tag_id] = content;
 	}
+	tag_text_lengths.resize(tag_text.size(), 0);
+	tag_text_bmp_only.resize(tag_text.size(), true);
+	tag_prefixes.resize(tag_text.size());
+	tag_prefix_lengths.resize(tag_text.size(), 0);
+	for (idx_t tag_id = 0; tag_id < tag_text.size(); tag_id++) {
+		if (tag_text[tag_id].empty()) {
+			continue;
+		}
+		tag_text_lengths[tag_id] = LdbcJavaStringLength(tag_text[tag_id]);
+		tag_text_bmp_only[tag_id] = IsBmpOnlyUtf8(tag_text[tag_id]);
+		auto tag_name = tags.GetName(NumericCast<int32_t>(tag_id));
+		std::replace(tag_name.begin(), tag_name.end(), '_', ' ');
+		string escaped_tag_name;
+		for (auto character : tag_name) {
+			if (character == '"') {
+				escaped_tag_name += "\\\"";
+			} else {
+				escaped_tag_name += character;
+			}
+		}
+		tag_prefixes[tag_id] = "About " + escaped_tag_name + ", ";
+		tag_prefix_lengths[tag_id] = LdbcJavaStringLength(tag_prefixes[tag_id]);
+	}
 }
 
 int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size, LdbcJavaRandom &random_reduced_text,
@@ -771,51 +804,50 @@ string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, con
 	}
 
 	string result;
+	result.reserve(NumericCast<idx_t>(text_size) + 64);
+	int32_t result_length = 0;
 	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
-	while (LdbcJavaStringLength(result) < text_size) {
+	while (result_length < text_size) {
 		for (auto tag_id : tag_ids) {
-			if (LdbcJavaStringLength(result) >= text_size) {
+			if (result_length >= text_size) {
 				break;
 			}
 			if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_text.size() || tag_text[tag_id].empty()) {
 				throw InternalException("LDBC tag text id out of range");
 			}
-			auto &content = tag_text[tag_id];
-			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - LdbcJavaStringLength(result));
-			auto tag_name = this->tags.GetName(tag_id);
-			std::replace(tag_name.begin(), tag_name.end(), '_', ' ');
-			string escaped_tag_name;
-			for (auto character : tag_name) {
-				if (character == '"') {
-					escaped_tag_name += "\\\"";
-				} else {
-					escaped_tag_name += character;
-				}
-			}
-			auto prefix = "About " + escaped_tag_name + ", ";
-			this_tag_text_size += LdbcJavaStringLength(prefix);
-			auto content_length = LdbcJavaStringLength(content);
+			auto tag_idx = NumericCast<idx_t>(tag_id);
+			auto &content = tag_text[tag_idx];
+			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - result_length);
+			auto &prefix = tag_prefixes[tag_idx];
+			auto prefix_length = tag_prefix_lengths[tag_idx];
+			this_tag_text_size += prefix_length;
+			auto content_length = tag_text_lengths[tag_idx];
 			if (this_tag_text_size >= content_length) {
 				result += content;
+				result_length += content_length;
 			} else {
-				auto prefix_length = LdbcJavaStringLength(prefix);
 				auto starting_pos = random_text_size.NextInt(content_length - this_tag_text_size + prefix_length);
+				auto fragment = LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
 				result += prefix;
-				result += LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
+				result += fragment;
+				result_length += tag_text_bmp_only[tag_idx] ? this_tag_text_size
+				                                            : prefix_length + LdbcJavaStringLength(fragment);
 			}
 		}
 	}
 
 	if (!result.empty() && result.back() != '.') {
 		result += ".";
+		result_length++;
 	}
-	if (LdbcJavaStringLength(result) < text_size - 1) {
+	if (result_length < text_size - 1) {
 		result += " ";
+		result_length++;
 	}
-	if (LdbcJavaStringLength(result) > text_size) {
+	if (result_length > text_size) {
 		result = LdbcJavaSubstring(result, 0, text_size - 1);
 	}
-	return StringUtil::Replace(result, "|", " ");
+	return result.find('|') == string::npos ? result : StringUtil::Replace(result, "|", " ");
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {

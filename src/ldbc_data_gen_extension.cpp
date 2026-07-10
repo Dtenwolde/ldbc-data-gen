@@ -25,14 +25,48 @@
 #include "duckdb/planner/binder.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <limits>
 #include <set>
 #include <sstream>
 #include <unordered_map>
 
 namespace duckdb {
+
+static bool LdbcProfileEnabled() {
+	static bool enabled = std::getenv("LDBCGEN_PROFILE") != nullptr;
+	return enabled;
+}
+
+static double LdbcProfileNowMs() {
+	using namespace std::chrono;
+	return static_cast<double>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count()) / 1000.0;
+}
+
+class LdbcProfileTimer {
+public:
+	explicit LdbcProfileTimer(const char *name_p) : name(name_p), enabled(LdbcProfileEnabled()) {
+		if (enabled) {
+			start_ms = LdbcProfileNowMs();
+		}
+	}
+
+	~LdbcProfileTimer() {
+		if (enabled) {
+			std::cerr << "[ldbcgen] " << name << ": " << std::fixed << std::setprecision(3)
+			          << (LdbcProfileNowMs() - start_ms) << " ms" << std::endl;
+		}
+	}
+
+private:
+	const char *name;
+	bool enabled;
+	double start_ms = 0;
+};
 
 struct LdbcSchemaColumn {
 	const char *relation_name;
@@ -826,11 +860,17 @@ struct PersonOwnedRowCounts {
 
 static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data,
                                                     LdbcGenGlobalState *progress_state) {
+	LdbcProfileTimer timer("populate.dynamic.total");
 	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
 	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
 	LdbcDateGenerator dates(config);
-	auto persons = LdbcGeneratePersons(config);
+	vector<LdbcPersonCore> persons;
+	{
+		LdbcProfileTimer phase("generate.persons");
+		persons = LdbcGeneratePersons(config);
+	}
 	SetLdbcGenProgress(progress_state, 25.0);
+	LdbcProfileTimer append_timer("append.dynamic.total");
 	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
 	auto interest_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Person_hasInterest_Tag");
 	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
@@ -851,177 +891,197 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 	                         (1.0 - config.bulkload_portion));
 
 	PersonOwnedRowCounts row_counts;
-	for (idx_t person_idx = 0; person_idx < persons.size(); person_idx++) {
-		auto &person = persons[person_idx];
-		if (person.creation_date >= bulkload_threshold) {
-			continue;
-		}
+	{
+		LdbcProfileTimer phase("append.person_owned");
+		for (idx_t person_idx = 0; person_idx < persons.size(); person_idx++) {
+			auto &person = persons[person_idx];
+			if (person.creation_date >= bulkload_threshold) {
+				continue;
+			}
 
-		person_appender->BeginRow();
-		person_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-		person_appender->Append<int64_t>(person.account_id);
-		person_appender->Append(Value(person.first_name));
-		person_appender->Append(Value(person.last_name));
-		person_appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
-		person_appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
-		person_appender->Append(Value(person.ip_address));
-		person_appender->Append(Value(person.browser_name));
-		person_appender->Append<int32_t>(person.city_id);
-		person_appender->Append(Value(person.languages));
-		person_appender->Append(Value(person.emails));
-		person_appender->EndRow();
-		row_counts.persons++;
+			person_appender->BeginRow();
+			person_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+			person_appender->Append<int64_t>(person.account_id);
+			person_appender->Append(Value(person.first_name));
+			person_appender->Append(Value(person.last_name));
+			person_appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
+			person_appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
+			person_appender->Append(Value(person.ip_address));
+			person_appender->Append(Value(person.browser_name));
+			person_appender->Append<int32_t>(person.city_id);
+			person_appender->Append(Value(person.languages));
+			person_appender->Append(Value(person.emails));
+			person_appender->EndRow();
+			row_counts.persons++;
 
-		for (auto tag_id : person.interests) {
-			AppendTimestampInt64Int32Row(interest_appender, LdbcTimestampMs(person.creation_date), person.account_id,
-			                             tag_id);
-			row_counts.interests++;
-		}
+			for (auto tag_id : person.interests) {
+				AppendTimestampInt64Int32Row(interest_appender, LdbcTimestampMs(person.creation_date),
+				                             person.account_id, tag_id);
+				row_counts.interests++;
+			}
 
-		if (person.university_id != -1 && person.class_year != -1) {
-			study_appender->BeginRow();
-			study_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-			study_appender->Append<int64_t>(person.account_id);
-			study_appender->Append<int64_t>(person.university_id);
-			study_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(person.class_year)));
-			study_appender->EndRow();
-			row_counts.study_at++;
-		}
+			if (person.university_id != -1 && person.class_year != -1) {
+				study_appender->BeginRow();
+				study_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+				study_appender->Append<int64_t>(person.account_id);
+				study_appender->Append<int64_t>(person.university_id);
+				study_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(person.class_year)));
+				study_appender->EndRow();
+				row_counts.study_at++;
+			}
 
-		for (auto &company : person.companies) {
-			work_appender->BeginRow();
-			work_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-			work_appender->Append<int64_t>(person.account_id);
-			work_appender->Append<int64_t>(company.first);
-			work_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(company.second)));
-			work_appender->EndRow();
-			row_counts.work_at++;
-		}
-		if ((person_idx & 1023) == 0) {
-			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(25.0, 45.0, person_idx + 1, persons.size()));
+			for (auto &company : person.companies) {
+				work_appender->BeginRow();
+				work_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
+				work_appender->Append<int64_t>(person.account_id);
+				work_appender->Append<int64_t>(company.first);
+				work_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(company.second)));
+				work_appender->EndRow();
+				row_counts.work_at++;
+			}
+			if ((person_idx & 1023) == 0) {
+				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(25.0, 45.0, person_idx + 1, persons.size()));
+			}
 		}
 	}
 	SetLdbcGenProgress(progress_state, 45.0);
 
-	auto knows_edges = LdbcGenerateKnows(config, persons);
+	vector<LdbcKnowsEdge> knows_edges;
+	{
+		LdbcProfileTimer phase("generate.knows");
+		knows_edges = LdbcGenerateKnows(config, persons);
+	}
 	SetLdbcGenProgress(progress_state, 55.0);
-	for (idx_t edge_idx = 0; edge_idx < knows_edges.size(); edge_idx++) {
-		auto &edge = knows_edges[edge_idx];
-		if (edge.creation_date >= bulkload_threshold) {
-			continue;
-		}
-		AppendTimestampInt64Int64Row(knows_appender, LdbcTimestampMs(edge.creation_date), edge.person1_id,
-		                             edge.person2_id);
-		row_counts.knows++;
-		if ((edge_idx & 4095) == 0) {
-			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(55.0, 65.0, edge_idx + 1, knows_edges.size()));
+	{
+		LdbcProfileTimer phase("append.knows");
+		for (idx_t edge_idx = 0; edge_idx < knows_edges.size(); edge_idx++) {
+			auto &edge = knows_edges[edge_idx];
+			if (edge.creation_date >= bulkload_threshold) {
+				continue;
+			}
+			AppendTimestampInt64Int64Row(knows_appender, LdbcTimestampMs(edge.creation_date), edge.person1_id,
+			                             edge.person2_id);
+			row_counts.knows++;
+			if ((edge_idx & 4095) == 0) {
+				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(55.0, 65.0, edge_idx + 1, knows_edges.size()));
+			}
 		}
 	}
 	SetLdbcGenProgress(progress_state, 65.0);
 
-	auto forums = LdbcGenerateForums(config, persons, knows_edges);
-	SetLdbcGenProgress(progress_state, 75.0);
-	for (idx_t forum_idx = 0; forum_idx < forums.size(); forum_idx++) {
-		auto &forum = forums[forum_idx];
-		if (forum.creation_date < bulkload_threshold) {
-			forum_appender->BeginRow();
-			forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
-			forum_appender->Append<int64_t>(forum.id);
-			forum_appender->Append(Value(forum.title));
-			forum_appender->Append<int64_t>(forum.moderator_person_id);
-			forum_appender->EndRow();
-			row_counts.forums++;
+	vector<LdbcForum> forums;
+	{
+		LdbcProfileTimer phase("generate.forums");
+		forums = LdbcGenerateForums(config, persons, knows_edges, [&](idx_t done, idx_t total) {
+			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(65.0, 93.0, done, total));
+		});
+	}
+	SetLdbcGenProgress(progress_state, 93.0);
+	{
+		LdbcProfileTimer phase("append.forums_messages_likes");
+		for (idx_t forum_idx = 0; forum_idx < forums.size(); forum_idx++) {
+			auto &forum = forums[forum_idx];
+			if (forum.creation_date < bulkload_threshold) {
+				forum_appender->BeginRow();
+				forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
+				forum_appender->Append<int64_t>(forum.id);
+				forum_appender->Append(Value(forum.title));
+				forum_appender->Append<int64_t>(forum.moderator_person_id);
+				forum_appender->EndRow();
+				row_counts.forums++;
 
-			for (auto tag_id : forum.tags) {
-				AppendTimestampInt64Int32Row(forum_tag_appender, LdbcTimestampMs(forum.creation_date), forum.id,
-				                             tag_id);
-				row_counts.forum_tags++;
+				for (auto tag_id : forum.tags) {
+					AppendTimestampInt64Int32Row(forum_tag_appender, LdbcTimestampMs(forum.creation_date), forum.id,
+					                             tag_id);
+					row_counts.forum_tags++;
+				}
 			}
-		}
 
-		for (auto &membership : forum.memberships) {
-			if (membership.creation_date >= bulkload_threshold) {
-				continue;
+			for (auto &membership : forum.memberships) {
+				if (membership.creation_date >= bulkload_threshold) {
+					continue;
+				}
+				AppendTimestampInt64Int64Row(forum_member_appender, LdbcTimestampMs(membership.creation_date),
+				                             membership.forum_id, membership.person_id);
+				row_counts.forum_members++;
 			}
-			AppendTimestampInt64Int64Row(forum_member_appender, LdbcTimestampMs(membership.creation_date),
-			                             membership.forum_id, membership.person_id);
-			row_counts.forum_members++;
-		}
 
-		for (auto &post : forum.posts) {
-			if (post.creation_date >= bulkload_threshold) {
-				continue;
-			}
-			post_appender->BeginRow();
-			post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
-			post_appender->Append<int64_t>(post.id);
-			post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
-			post_appender->Append(Value(post.location_ip));
-			post_appender->Append(Value(post.browser_used));
-			post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
-			post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
-			post_appender->Append<int32_t>(post.length);
-			post_appender->Append<int64_t>(post.creator_person_id);
-			post_appender->Append<int64_t>(post.forum_id);
-			post_appender->Append<int64_t>(post.location_country_id);
-			post_appender->EndRow();
-			row_counts.posts++;
+			for (auto &post : forum.posts) {
+				if (post.creation_date >= bulkload_threshold) {
+					continue;
+				}
+				post_appender->BeginRow();
+				post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
+				post_appender->Append<int64_t>(post.id);
+				post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
+				post_appender->Append(Value(post.location_ip));
+				post_appender->Append(Value(post.browser_used));
+				post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
+				post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
+				post_appender->Append<int32_t>(post.length);
+				post_appender->Append<int64_t>(post.creator_person_id);
+				post_appender->Append<int64_t>(post.forum_id);
+				post_appender->Append<int64_t>(post.location_country_id);
+				post_appender->EndRow();
+				row_counts.posts++;
 
-			for (auto tag_id : post.tags) {
-				AppendTimestampInt64Int32Row(post_tag_appender, LdbcTimestampMs(post.creation_date), post.id, tag_id);
-				row_counts.post_tags++;
+				for (auto tag_id : post.tags) {
+					AppendTimestampInt64Int32Row(post_tag_appender, LdbcTimestampMs(post.creation_date), post.id,
+					                             tag_id);
+					row_counts.post_tags++;
+				}
 			}
-		}
 
-		for (auto &comment : forum.comments) {
-			if (comment.creation_date >= bulkload_threshold) {
-				continue;
-			}
-			comment_appender->BeginRow();
-			comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
-			comment_appender->Append<int64_t>(comment.id);
-			comment_appender->Append(Value(comment.location_ip));
-			comment_appender->Append(Value(comment.browser_used));
-			comment_appender->Append(Value(comment.content));
-			comment_appender->Append<int32_t>(comment.length);
-			comment_appender->Append<int64_t>(comment.creator_person_id);
-			comment_appender->Append<int64_t>(comment.location_country_id);
-			comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
-			                                                      : Value::BIGINT(comment.parent_post_id));
-			comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
-			                                                         : Value::BIGINT(comment.parent_comment_id));
-			comment_appender->EndRow();
-			row_counts.comments++;
+			for (auto &comment : forum.comments) {
+				if (comment.creation_date >= bulkload_threshold) {
+					continue;
+				}
+				comment_appender->BeginRow();
+				comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
+				comment_appender->Append<int64_t>(comment.id);
+				comment_appender->Append(Value(comment.location_ip));
+				comment_appender->Append(Value(comment.browser_used));
+				comment_appender->Append(Value(comment.content));
+				comment_appender->Append<int32_t>(comment.length);
+				comment_appender->Append<int64_t>(comment.creator_person_id);
+				comment_appender->Append<int64_t>(comment.location_country_id);
+				comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
+				                                                      : Value::BIGINT(comment.parent_post_id));
+				comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
+				                                                         : Value::BIGINT(comment.parent_comment_id));
+				comment_appender->EndRow();
+				row_counts.comments++;
 
-			for (auto tag_id : comment.tags) {
-				AppendTimestampInt64Int32Row(comment_tag_appender, LdbcTimestampMs(comment.creation_date), comment.id,
-				                             tag_id);
-				row_counts.comment_tags++;
+				for (auto tag_id : comment.tags) {
+					AppendTimestampInt64Int32Row(comment_tag_appender, LdbcTimestampMs(comment.creation_date),
+					                             comment.id, tag_id);
+					row_counts.comment_tags++;
+				}
 			}
-		}
 
-		for (auto &like : forum.post_likes) {
-			if (like.creation_date >= bulkload_threshold) {
-				continue;
+			for (auto &like : forum.post_likes) {
+				if (like.creation_date >= bulkload_threshold) {
+					continue;
+				}
+				AppendTimestampInt64Int64Row(post_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
+				                             like.message_id);
+				row_counts.post_likes++;
 			}
-			AppendTimestampInt64Int64Row(post_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
-			                             like.message_id);
-			row_counts.post_likes++;
-		}
 
-		for (auto &like : forum.comment_likes) {
-			if (like.creation_date >= bulkload_threshold) {
-				continue;
+			for (auto &like : forum.comment_likes) {
+				if (like.creation_date >= bulkload_threshold) {
+					continue;
+				}
+				AppendTimestampInt64Int64Row(comment_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
+				                             like.message_id);
+				row_counts.comment_likes++;
 			}
-			AppendTimestampInt64Int64Row(comment_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
-			                             like.message_id);
-			row_counts.comment_likes++;
-		}
-		if ((forum_idx & 255) == 0) {
-			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(75.0, 95.0, forum_idx + 1, forums.size()));
+			if ((forum_idx & 255) == 0) {
+				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(93.0, 98.0, forum_idx + 1, forums.size()));
+			}
 		}
 	}
-	SetLdbcGenProgress(progress_state, 95.0);
+	SetLdbcGenProgress(progress_state, 98.0);
 	person_appender->Close();
 	interest_appender.Close();
 	study_appender->Close();
@@ -1040,17 +1100,34 @@ static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, cons
 }
 
 static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                         LdbcGenGlobalState *progress_state = nullptr) {
-	auto data = LoadStaticDictionaryData(bind_data);
+                                                        LdbcGenGlobalState *progress_state = nullptr) {
+	LdbcProfileTimer timer("populate.total");
+	StaticDictionaryData data;
+	{
+		LdbcProfileTimer phase("load.static_dictionaries");
+		data = LoadStaticDictionaryData(bind_data);
+	}
 	SetLdbcGenProgress(progress_state, 4.0);
 	unordered_map<string, idx_t> row_counts;
-	row_counts["Place"] = AppendPlaces(context, bind_data, data);
+	{
+		LdbcProfileTimer phase("append.static.Place");
+		row_counts["Place"] = AppendPlaces(context, bind_data, data);
+	}
 	SetLdbcGenProgress(progress_state, 8.0);
-	row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
+	{
+		LdbcProfileTimer phase("append.static.TagClass");
+		row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
+	}
 	SetLdbcGenProgress(progress_state, 12.0);
-	row_counts["Tag"] = AppendTags(context, bind_data, data);
+	{
+		LdbcProfileTimer phase("append.static.Tag");
+		row_counts["Tag"] = AppendTags(context, bind_data, data);
+	}
 	SetLdbcGenProgress(progress_state, 16.0);
-	row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
+	{
+		LdbcProfileTimer phase("append.static.Organisation");
+		row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
+	}
 	SetLdbcGenProgress(progress_state, 20.0);
 	auto person_counts = AppendPersonOwnedTables(context, bind_data, progress_state);
 	row_counts["Person"] = person_counts.persons;
@@ -1118,6 +1195,7 @@ namespace ldbc {
 
 void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite,
                                       bool primary_keys) {
+	LdbcProfileTimer timer("create_schema");
 	CreateSchemaIfNeeded(context, catalog, schema);
 
 	idx_t relation_start = 0;
@@ -1228,6 +1306,7 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	auto &state = data_p.global_state->Cast<LdbcGenGlobalState>();
 
 	if (bind_data.target == "tables" && !state.materialized) {
+		LdbcProfileTimer timer("ldbcgen.materialize");
 		SetLdbcGenProgress(&state, 1.0);
 		ldbc::LDBCGenWrapper::CreateLDBCSchema(context, bind_data.catalog, bind_data.schema, bind_data.overwrite,
 		                                       bind_data.primary_keys);
