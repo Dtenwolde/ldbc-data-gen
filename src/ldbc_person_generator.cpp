@@ -438,19 +438,106 @@ static LdbcKnowsEdge CreateKnowsEdge(LdbcDateGenerator &dates, LdbcRandomGenerat
 	return edge;
 }
 
-template <class SORT>
-static void GenerateKnowsStep(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
-                              const LdbcPersonDictionaries &dictionaries, LdbcDateGenerator &dates,
-                              const vector<float> &percentages, idx_t step_index, SORT sort_function,
-                              vector<LdbcKnowsEdge> &edges) {
-	vector<idx_t> order;
-	order.reserve(persons.size());
-	for (idx_t idx = 0; idx < persons.size(); idx++) {
-		order.push_back(idx);
-	}
-	std::stable_sort(order.begin(), order.end(), sort_function);
+} // namespace
 
-	for (idx_t block_start = 0; block_start < order.size(); block_start += NumericCast<idx_t>(config.block_size)) {
+struct LdbcKnowsGenerator::Impl {
+	enum class Phase : uint8_t { GENERATE, SORT_MERGE, DONE };
+
+	Impl(const LdbcDatagenConfig &config_p, const vector<LdbcPersonCore> &persons_p)
+	    : config(config_p), persons(persons_p),
+	      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
+	                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ),
+	      dates(config) {
+		if (config.knows_generator != "Distance") {
+			throw InvalidInputException("Only the Distance LDBC knows generator is currently supported");
+		}
+		if (config.person_similarity != "GeoDistance") {
+			throw InvalidInputException("Only GeoDistance LDBC person similarity is currently supported");
+		}
+		PrepareStep();
+	}
+
+	bool GenerateNext(idx_t max_blocks) {
+		if (phase == Phase::DONE) {
+			return true;
+		}
+		if (phase == Phase::SORT_MERGE) {
+			SortMerge();
+			phase = Phase::DONE;
+			return true;
+		}
+
+		idx_t generated_blocks = 0;
+		while (generated_blocks < max_blocks && phase == Phase::GENERATE) {
+			if (block_start >= order.size()) {
+				step_index++;
+				if (step_index >= percentages.size()) {
+					phase = Phase::SORT_MERGE;
+					break;
+				}
+				PrepareStep();
+				continue;
+			}
+			GenerateBlock();
+			generated_blocks++;
+		}
+		return false;
+	}
+
+	double Progress() const {
+		if (phase == Phase::DONE) {
+			return 100.0;
+		}
+		if (phase == Phase::SORT_MERGE) {
+			return 95.0;
+		}
+		auto block_size = NumericCast<idx_t>(config.block_size);
+		auto blocks = (persons.size() + block_size - 1) / block_size;
+		auto completed_blocks = step_index * blocks + std::min<idx_t>(blocks, (block_start + block_size - 1) / block_size);
+		auto total_blocks = percentages.size() * blocks;
+		return total_blocks == 0 ? 100.0 : 90.0 * (static_cast<double>(completed_blocks) / total_blocks);
+	}
+
+	vector<LdbcKnowsEdge> ReleaseEdges() {
+		return std::move(merged_edges);
+	}
+
+	void PrepareStep() {
+		order.clear();
+		order.reserve(persons.size());
+		for (idx_t idx = 0; idx < persons.size(); idx++) {
+			order.push_back(idx);
+		}
+		std::stable_sort(order.begin(), order.end(), [&](idx_t left, idx_t right) { return CompareForStep(left, right); });
+		block_start = 0;
+	}
+
+	bool CompareForStep(idx_t left, idx_t right) const {
+		auto &left_person = persons[left];
+		auto &right_person = persons[right];
+		switch (step_index) {
+		case 0:
+			if (left_person.university_location_id != right_person.university_location_id) {
+				return left_person.university_location_id < right_person.university_location_id;
+			}
+			break;
+		case 1:
+			if (left_person.main_interest != right_person.main_interest) {
+				return left_person.main_interest < right_person.main_interest;
+			}
+			break;
+		case 2:
+			if (left_person.random_id != right_person.random_id) {
+				return left_person.random_id < right_person.random_id;
+			}
+			break;
+		default:
+			throw InternalException("Unexpected LDBC knows generation step");
+		}
+		return left_person.account_id < right_person.account_id;
+	}
+
+	void GenerateBlock() {
 		auto block_end = std::min<idx_t>(order.size(), block_start + NumericCast<idx_t>(config.block_size));
 		auto block_id = block_start / NumericCast<idx_t>(config.block_size);
 		LdbcRandomGeneratorFarm random_farm;
@@ -476,92 +563,82 @@ static void GenerateKnowsStep(const LdbcDatagenConfig &config, const vector<Ldbc
 					continue;
 				}
 				auto edge = CreateKnowsEdge(dates, random_farm, person_a, person_b, dictionaries);
-				edges.push_back(edge);
+				generated_edges.push_back(edge);
 				std::swap(edge.person1_id, edge.person2_id);
-				edges.push_back(edge);
+				generated_edges.push_back(edge);
 				local_degrees[local_i]++;
 				local_degrees[local_j]++;
 			}
 		}
+		block_start = block_end;
 	}
+
+	void SortMerge() {
+		std::sort(generated_edges.begin(), generated_edges.end(),
+		          [](const LdbcKnowsEdge &left, const LdbcKnowsEdge &right) {
+			          if (left.person1_id != right.person1_id) {
+				          return left.person1_id < right.person1_id;
+			          }
+			          if (left.person2_id != right.person2_id) {
+				          return left.person2_id < right.person2_id;
+			          }
+			          return left.creation_date < right.creation_date;
+		          });
+
+		merged_edges.clear();
+		merged_edges.reserve(generated_edges.size() / 2);
+		int64_t last_from = NumericLimits<int64_t>::Minimum();
+		int64_t last_to = NumericLimits<int64_t>::Minimum();
+		for (auto &edge : generated_edges) {
+			if (edge.person1_id == last_from && edge.person2_id == last_to) {
+				continue;
+			}
+			last_from = edge.person1_id;
+			last_to = edge.person2_id;
+			if (edge.person1_id < edge.person2_id) {
+				merged_edges.push_back(edge);
+			}
+		}
+		generated_edges.clear();
+		generated_edges.shrink_to_fit();
+	}
+
+	const LdbcDatagenConfig &config;
+	const vector<LdbcPersonCore> &persons;
+	LdbcPersonDictionaries dictionaries;
+	LdbcDateGenerator dates;
+	vector<float> percentages {0.45f, 0.45f, 0.1f};
+	Phase phase = Phase::GENERATE;
+	idx_t step_index = 0;
+	vector<idx_t> order;
+	idx_t block_start = 0;
+	vector<LdbcKnowsEdge> generated_edges;
+	vector<LdbcKnowsEdge> merged_edges;
+};
+
+LdbcKnowsGenerator::LdbcKnowsGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons)
+    : impl(make_uniq<Impl>(config, persons)) {
 }
 
-} // namespace
+LdbcKnowsGenerator::~LdbcKnowsGenerator() = default;
+
+bool LdbcKnowsGenerator::GenerateNext(idx_t max_blocks) {
+	return impl->GenerateNext(max_blocks);
+}
+
+double LdbcKnowsGenerator::Progress() const {
+	return impl->Progress();
+}
+
+vector<LdbcKnowsEdge> LdbcKnowsGenerator::ReleaseEdges() {
+	return impl->ReleaseEdges();
+}
 
 vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons) {
-	if (config.knows_generator != "Distance") {
-		throw InvalidInputException("Only the Distance LDBC knows generator is currently supported");
+	LdbcKnowsGenerator generator(config, persons);
+	while (!generator.GenerateNext(256)) {
 	}
-	if (config.person_similarity != "GeoDistance") {
-		throw InvalidInputException("Only GeoDistance LDBC person similarity is currently supported");
-	}
-
-	LdbcPersonDictionaries dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang,
-	                                    config.tag_country_corr_prob, config.prob_uncorrelated_company,
-	                                    config.prob_uncorrelated_organisation, config.prob_top_univ);
-	LdbcDateGenerator dates(config);
-	vector<float> percentages {0.45f, 0.45f, 0.1f};
-	vector<LdbcKnowsEdge> generated_edges;
-
-	GenerateKnowsStep(
-	    config, persons, dictionaries, dates, percentages, 0,
-	    [&](idx_t left, idx_t right) {
-		    auto &left_person = persons[left];
-		    auto &right_person = persons[right];
-		    if (left_person.university_location_id != right_person.university_location_id) {
-			    return left_person.university_location_id < right_person.university_location_id;
-		    }
-		    return left_person.account_id < right_person.account_id;
-	    },
-	    generated_edges);
-	GenerateKnowsStep(
-	    config, persons, dictionaries, dates, percentages, 1,
-	    [&](idx_t left, idx_t right) {
-		    auto &left_person = persons[left];
-		    auto &right_person = persons[right];
-		    if (left_person.main_interest != right_person.main_interest) {
-			    return left_person.main_interest < right_person.main_interest;
-		    }
-		    return left_person.account_id < right_person.account_id;
-	    },
-	    generated_edges);
-	GenerateKnowsStep(
-	    config, persons, dictionaries, dates, percentages, 2,
-	    [&](idx_t left, idx_t right) {
-		    auto &left_person = persons[left];
-		    auto &right_person = persons[right];
-		    if (left_person.random_id != right_person.random_id) {
-			    return left_person.random_id < right_person.random_id;
-		    }
-		    return left_person.account_id < right_person.account_id;
-	    },
-	    generated_edges);
-
-	std::sort(generated_edges.begin(), generated_edges.end(),
-	          [](const LdbcKnowsEdge &left, const LdbcKnowsEdge &right) {
-		          if (left.person1_id != right.person1_id) {
-			          return left.person1_id < right.person1_id;
-		          }
-		          if (left.person2_id != right.person2_id) {
-			          return left.person2_id < right.person2_id;
-		          }
-		          return left.creation_date < right.creation_date;
-	          });
-
-	vector<LdbcKnowsEdge> merged_edges;
-	int64_t last_from = NumericLimits<int64_t>::Minimum();
-	int64_t last_to = NumericLimits<int64_t>::Minimum();
-	for (auto &edge : generated_edges) {
-		if (edge.person1_id == last_from && edge.person2_id == last_to) {
-			continue;
-		}
-		last_from = edge.person1_id;
-		last_to = edge.person2_id;
-		if (edge.person1_id < edge.person2_id) {
-			merged_edges.push_back(edge);
-		}
-	}
-	return merged_edges;
+	return generator.ReleaseEdges();
 }
 
 namespace {

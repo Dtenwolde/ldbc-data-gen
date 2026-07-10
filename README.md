@@ -29,7 +29,7 @@ CALL ldbcgen(
 );
 ```
 
-The current implementation validates parameters, creates the BI static tables, populates the static dictionary-backed tables (`Place`, `TagClass`, `Tag`, `Organisation`), and leaves dynamic tables empty.
+The current implementation validates parameters and generates the BI static initial snapshot relations either as DuckDB tables or as files.
 
 Returned columns:
 
@@ -37,10 +37,10 @@ Returned columns:
 | --- | --- | --- |
 | `relation_name` | `VARCHAR` | Generated relation or logical artifact name |
 | `path` | `VARCHAR` | Output schema for table generation, or output path for file generation |
-| `row_count` | `BIGINT` | Generated row count, nullable while planning |
+| `row_count` | `BIGINT` | Generated row count |
 | `checksum` | `VARCHAR` | Stable content checksum, nullable while planning |
 | `format` | `VARCHAR` | `parquet` or `csv` |
-| `status` | `VARCHAR` | `created`, `recreated`, or `planned` |
+| `status` | `VARCHAR` | `created` or `recreated` |
 
 The default generation target is in-database DuckDB tables. File output is explicit:
 
@@ -52,6 +52,8 @@ CALL ldbcgen(
     format := 'parquet'
 );
 ```
+
+File output writes one file per BI static relation under `<output_dir>/static/` and `<output_dir>/dynamic/`. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing files.
 
 Schema-only metadata is available through:
 

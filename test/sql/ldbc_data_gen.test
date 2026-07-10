@@ -11,6 +11,8 @@ Catalog Error: Table Function with name ldbcgen does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
+require parquet
+
 # Spark-derived datagen configuration is resolved from pinned params_default.ini
 # plus scale_factors.xml.
 query TTTT
@@ -495,11 +497,29 @@ Catalog Error: Table with name "Organisation" already exists!
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test', overwrite := true);
 
-query TTTTTT
-SELECT relation_name, path, row_count, checksum, format, status
-FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003', format := 'parquet', overwrite := false);
+query ITTI
+SELECT COUNT(*), MIN(format), MIN(status), SUM(row_count)
+FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-parquet', format := 'parquet', overwrite := true);
 ----
-ldbc_snb_bi_static	out/sf0.003	NULL	NULL	parquet	planned
+18	parquet	recreated	35310
+
+query I
+SELECT COUNT(*)
+FROM read_parquet('out/sf0.003-parquet/dynamic/Person.parquet');
+----
+50
+
+query ITTI
+SELECT COUNT(*), MIN(format), MIN(status), SUM(row_count)
+FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-csv', format := 'csv', overwrite := true);
+----
+18	csv	recreated	35310
+
+query I
+SELECT COUNT(*)
+FROM read_csv('out/sf0.003-csv/dynamic/Person.csv', header := true);
+----
+50
 
 statement error
 CALL ldbcgen(sf := 0);

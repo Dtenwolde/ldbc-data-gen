@@ -22,7 +22,12 @@
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/catalog/catalog_search_path.hpp"
+#include "duckdb/common/file_system.hpp"
+#include "duckdb/common/sql_identifier.hpp"
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/query_result.hpp"
 #include "duckdb/planner/binder.hpp"
+#include "duckdb/transaction/transaction.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -214,6 +219,10 @@ struct LdbcGenGlobalState : public GlobalTableFunctionState {
 	idx_t offset = 0;
 	std::atomic<double> progress {0.0};
 	unordered_map<string, idx_t> row_counts;
+	unordered_map<string, string> output_paths;
+	unique_ptr<LdbcGenBindData> file_bind_data;
+	unique_ptr<DuckDB> file_database;
+	unique_ptr<Connection> file_connection;
 	unique_ptr<LdbcLoadGenerator> load_generator;
 };
 
@@ -246,6 +255,24 @@ static double LdbcGenProgressRange(double start, double end, idx_t done, idx_t t
 		return end;
 	}
 	return start + ((end - start) * (static_cast<double>(done) / static_cast<double>(total)));
+}
+
+static void ExecuteLdbcSQL(ClientContext &context, const string &sql) {
+	auto result = context.Query(sql, QueryResultOutputType::FORCE_MATERIALIZED);
+	if (result->HasError()) {
+		throw InvalidInputException("ldbcgen failed to execute SQL '%s': %s", sql, result->GetError());
+	}
+}
+
+static void MarkLdbcTransactionReadWrite(ClientContext &context, const string &catalog_name) {
+	auto &catalog = Catalog::GetCatalog(context, Identifier(catalog_name));
+	auto &transaction = Transaction::Get(context, catalog);
+	transaction.SetReadWrite();
+	DatabaseModificationType modification;
+	modification |= DatabaseModificationType::CREATE_CATALOG_ENTRY;
+	modification |= DatabaseModificationType::INSERT_DATA;
+	modification |= DatabaseModificationType::DROP_CATALOG_ENTRY;
+	transaction.SetModifications(modification);
 }
 
 struct LdbcGenSchemaBindData : public TableFunctionData {
@@ -1169,7 +1196,9 @@ public:
 			phase = Phase::GENERATE_PERSONS;
 			return false;
 		case Phase::GENERATE_PERSONS:
-			GeneratePersons();
+			if (!GeneratePersons()) {
+				return false;
+			}
 			phase = Phase::APPEND_PERSONS;
 			return false;
 		case Phase::APPEND_PERSONS:
@@ -1179,7 +1208,9 @@ public:
 			phase = Phase::GENERATE_KNOWS;
 			return false;
 		case Phase::GENERATE_KNOWS:
-			GenerateKnows();
+			if (!GenerateKnows()) {
+				return false;
+			}
 			phase = Phase::APPEND_KNOWS;
 			return false;
 		case Phase::APPEND_KNOWS:
@@ -1295,11 +1326,27 @@ private:
 		SetLdbcGenProgress(&progress_state, 20.0);
 	}
 
-	void GeneratePersons() {
+	bool GeneratePersons() {
 		EnsureDynamicState();
+		if (!person_generator) {
+			person_generator = make_uniq<LdbcPersonGenerator>(*config);
+			persons.reserve(NumericCast<idx_t>(config->num_persons));
+		}
 		LdbcProfileTimer timer("generate.persons");
-		persons = LdbcGeneratePersons(*config);
-		SetLdbcGenProgress(&progress_state, 25.0);
+		static constexpr idx_t PERSON_GENERATION_BATCH_SIZE = 256;
+		auto end = std::min<int64_t>(config->num_persons,
+		                             NumericCast<int64_t>(persons.size() + PERSON_GENERATION_BATCH_SIZE));
+		for (int64_t sequential_id = NumericCast<int64_t>(persons.size()); sequential_id < end; sequential_id++) {
+			persons.push_back(person_generator->GenerateCore(sequential_id));
+		}
+		SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(20.0, 25.0, persons.size(),
+		                                                         NumericCast<idx_t>(config->num_persons)));
+		if (persons.size() >= NumericCast<idx_t>(config->num_persons)) {
+			person_generator.reset();
+			SetLdbcGenProgress(&progress_state, 25.0);
+			return true;
+		}
+		return false;
 	}
 
 	bool AppendPersons() {
@@ -1354,10 +1401,21 @@ private:
 		return person_idx >= persons.size();
 	}
 
-	void GenerateKnows() {
+	bool GenerateKnows() {
+		if (!knows_generator) {
+			knows_generator = make_uniq<LdbcKnowsGenerator>(*config, persons);
+		}
 		LdbcProfileTimer timer("generate.knows");
-		knows_edges = LdbcGenerateKnows(*config, persons);
-		SetLdbcGenProgress(&progress_state, 55.0);
+		auto done = knows_generator->GenerateNext(4);
+		SetLdbcGenProgress(&progress_state,
+		                   LdbcGenProgressRange(45.0, 55.0, static_cast<idx_t>(knows_generator->Progress()), 100));
+		if (done) {
+			knows_edges = knows_generator->ReleaseEdges();
+			knows_generator.reset();
+			SetLdbcGenProgress(&progress_state, 55.0);
+			return true;
+		}
+		return false;
 	}
 
 	bool AppendKnows() {
@@ -1527,6 +1585,8 @@ private:
 	vector<LdbcKnowsEdge> knows_edges;
 	idx_t person_idx = 0;
 	idx_t knows_idx = 0;
+	unique_ptr<LdbcPersonGenerator> person_generator;
+	unique_ptr<LdbcKnowsGenerator> knows_generator;
 	unique_ptr<LdbcForumGenerator> forum_generator;
 
 	unique_ptr<InternalAppender> person_appender;
@@ -1544,6 +1604,16 @@ private:
 	unique_ptr<LdbcChunkAppender> post_like_appender;
 	unique_ptr<LdbcChunkAppender> comment_like_appender;
 };
+
+static unordered_map<string, idx_t> RunLdbcLoadGenerator(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                         LdbcGenGlobalState *progress_state = nullptr) {
+	LdbcGenGlobalState local_state;
+	auto &state = progress_state ? *progress_state : local_state;
+	LdbcLoadGenerator generator(context, bind_data, state);
+	while (!generator.GenerateNext()) {
+	}
+	return generator.ReleaseRowCounts();
+}
 
 static idx_t LdbcRelationCount() {
 	idx_t count = 0;
@@ -1574,6 +1644,89 @@ static const LdbcSchemaColumn &LdbcRelationAt(idx_t relation_index) {
 	throw InternalException("LDBC relation index out of range");
 }
 
+static string LdbcRelationOutputPath(ClientContext &context, const LdbcGenBindData &bind_data, idx_t relation_index) {
+	auto &fs = FileSystem::GetFileSystem(context);
+	auto &relation = LdbcRelationAt(relation_index);
+	auto extension = bind_data.format == "parquet" ? "parquet" : "csv";
+	return fs.JoinPath(bind_data.output_dir, string(relation.entity_path) + "." + extension);
+}
+
+static void EnsureLdbcOutputDirectories(ClientContext &context, const LdbcGenBindData &bind_data) {
+	auto &fs = FileSystem::GetFileSystem(context);
+	fs.CreateDirectoriesRecursive(bind_data.output_dir);
+	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
+		auto entity_path = string(LdbcRelationAt(relation_index).entity_path);
+		auto slash = entity_path.find_last_of('/');
+		if (slash == string::npos) {
+			continue;
+		}
+		fs.CreateDirectoriesRecursive(fs.JoinPath(bind_data.output_dir, entity_path.substr(0, slash)));
+	}
+}
+
+static string LdbcQualifiedTableName(const LdbcGenBindData &bind_data, const string &relation_name) {
+	return SQLQuotedIdentifier::ToString(bind_data.catalog) + "." + SQLQuotedIdentifier::ToString(bind_data.schema) +
+	       "." + SQLQuotedIdentifier::ToString(relation_name);
+}
+
+static void CreateLdbcStagingTablesWithSQL(ClientContext &context, const LdbcGenBindData &bind_data) {
+	ExecuteLdbcSQL(context, "CREATE SCHEMA " + SQLQuotedIdentifier::ToString(bind_data.catalog) + "." +
+	                            SQLQuotedIdentifier::ToString(bind_data.schema));
+	idx_t relation_start = 0;
+	for (idx_t row_idx = 1; row_idx <= LdbcSchemaSize(); row_idx++) {
+		if (row_idx != LdbcSchemaSize() &&
+		    string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) ==
+		        LDBC_BI_STATIC_SCHEMA[relation_start].relation_name) {
+			continue;
+		}
+		auto relation_name = string(LDBC_BI_STATIC_SCHEMA[relation_start].relation_name);
+		string sql = "CREATE TABLE " + LdbcQualifiedTableName(bind_data, relation_name) + " (";
+		for (idx_t column_idx = relation_start; column_idx < row_idx; column_idx++) {
+			if (column_idx > relation_start) {
+				sql += ", ";
+			}
+			auto &column = LDBC_BI_STATIC_SCHEMA[column_idx];
+			sql += SQLQuotedIdentifier::ToString(column.column_name);
+			sql += " ";
+			sql += column.logical_type;
+			if (!column.nullable) {
+				sql += " NOT NULL";
+			}
+		}
+		sql += ")";
+		ExecuteLdbcSQL(context, sql);
+		relation_start = row_idx;
+	}
+}
+
+static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                           LdbcGenGlobalState *progress_state = nullptr) {
+	EnsureLdbcOutputDirectories(context, bind_data);
+	unordered_map<string, string> output_paths;
+	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
+		auto &relation = LdbcRelationAt(relation_index);
+		auto relation_name = string(relation.relation_name);
+		auto output_path = LdbcRelationOutputPath(context, bind_data, relation_index);
+		string options;
+		if (bind_data.format == "csv") {
+			options = "FORMAT CSV, HEADER TRUE";
+		} else if (bind_data.format == "parquet") {
+			options = "FORMAT PARQUET";
+		} else {
+			throw InternalException("Unexpected LDBC file format: %s", bind_data.format);
+		}
+		if (bind_data.overwrite) {
+			options += ", OVERWRITE TRUE";
+		}
+		auto sql = "COPY " + LdbcQualifiedTableName(bind_data, relation_name) + " TO " +
+		           SQLString::ToString(output_path) + " (" + options + ")";
+		ExecuteLdbcSQL(context, sql);
+		output_paths[relation_name] = output_path;
+		SetLdbcGenProgress(progress_state, LdbcGenProgressRange(98.0, 100.0, relation_index + 1, LdbcRelationCount()));
+	}
+	return output_paths;
+}
+
 static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context, const LdbcGenBindData &bind_data) {
 	CreateSchemaIfNeeded(context, bind_data.catalog, bind_data.schema);
 
@@ -1586,7 +1739,7 @@ static unordered_map<string, idx_t> MaterializeLdbcTables(ClientContext &context
 			relation_start = row_idx;
 		}
 	}
-	return PopulateStaticTables(context, bind_data);
+	return RunLdbcLoadGenerator(context, bind_data);
 }
 
 namespace ldbc {
@@ -1614,7 +1767,7 @@ unordered_map<string, idx_t> LDBCGenWrapper::LoadLDBCData(ClientContext &context
 	bind_data.schema = std::move(schema);
 	bind_data.dictionary_dir = std::move(dictionary_dir);
 	bind_data.scale_factor = scale_factor;
-	return PopulateStaticTables(context, bind_data);
+	return RunLdbcLoadGenerator(context, bind_data);
 }
 
 idx_t LDBCGenWrapper::RelationCount() {
@@ -1746,7 +1899,53 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		}
 	}
 
-	if (state.offset >= (bind_data.target == "tables" ? ldbc::LDBCGenWrapper::RelationCount() : 1)) {
+	if (bind_data.target == "files" && !state.materialized.load()) {
+		if (!state.load_started.exchange(true)) {
+			state.file_database = make_uniq<DuckDB>(nullptr);
+			state.file_connection = make_uniq<Connection>(*state.file_database);
+			state.file_bind_data = make_uniq<LdbcGenBindData>(bind_data);
+			state.file_bind_data->target = "tables";
+			state.file_bind_data->catalog = DatabaseManager::GetDefaultDatabase(*state.file_connection->context).GetIdentifierName();
+			state.file_bind_data->schema =
+			    "__ldbcgen_files_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
+			state.file_bind_data->overwrite = true;
+			state.file_bind_data->primary_keys = false;
+			auto &file_context = *state.file_connection->context;
+			CreateLdbcStagingTablesWithSQL(file_context, *state.file_bind_data);
+			ExecuteLdbcSQL(file_context, "BEGIN TRANSACTION");
+			MarkLdbcTransactionReadWrite(file_context, state.file_bind_data->catalog);
+			state.load_generator = make_uniq<LdbcLoadGenerator>(file_context, *state.file_bind_data, state);
+		}
+		if (!state.load_generator || !state.file_bind_data || !state.file_connection) {
+			throw InternalException("LDBC file load generator was not initialized");
+		}
+		auto &file_context = *state.file_connection->context;
+		idx_t iterations = data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
+		for (idx_t iteration = 0; iteration < iterations; iteration++) {
+			if (state.load_generator->GenerateNext()) {
+				state.row_counts = state.load_generator->ReleaseRowCounts();
+				state.load_generator.reset();
+				ExecuteLdbcSQL(file_context, "COMMIT");
+				state.output_paths = CopyLdbcTablesToFiles(file_context, *state.file_bind_data, &state);
+				ExecuteLdbcSQL(file_context, "DROP SCHEMA " + SQLQuotedIdentifier::ToString(state.file_bind_data->catalog) +
+				                                 "." + SQLQuotedIdentifier::ToString(state.file_bind_data->schema) +
+				                                 " CASCADE");
+				state.file_bind_data.reset();
+				state.file_connection.reset();
+				state.file_database.reset();
+				state.materialized.store(true);
+				break;
+			}
+		}
+		if (!state.materialized.load()) {
+			if (data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR) {
+				data_p.async_result = LdbcGenYield();
+				return;
+			}
+		}
+	}
+
+	if (state.offset >= ldbc::LDBCGenWrapper::RelationCount()) {
 		SetLdbcGenProgress(&state, 100.0);
 		state.finished.store(true);
 		data_p.async_result = AsyncResultType::FINISHED;
@@ -1755,15 +1954,22 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 
 	idx_t count = 0;
 	if (bind_data.target == "files") {
-		output.data[0].SetValue(0, "ldbc_snb_bi_static");
-		output.data[1].SetValue(0, bind_data.output_dir);
-		output.data[2].SetValue(0, Value(LogicalType::BIGINT));
-		output.data[3].SetValue(0, Value(LogicalType::VARCHAR));
-		output.data[4].SetValue(0, bind_data.format);
-		output.data[5].SetValue(0, "planned");
-		count = 1;
-		state.offset = 1;
-		SetLdbcGenProgress(&state, 100.0);
+		while (state.offset < ldbc::LDBCGenWrapper::RelationCount() && count < STANDARD_VECTOR_SIZE) {
+			auto relation_name = ldbc::LDBCGenWrapper::RelationName(state.offset);
+			output.data[0].SetValue(count, relation_name);
+			auto output_path = state.output_paths.find(relation_name);
+			output.data[1].SetValue(count, output_path == state.output_paths.end() ? Value(LogicalType::VARCHAR)
+			                                                                       : Value(output_path->second));
+			auto row_count = state.row_counts.find(relation_name);
+			output.data[2].SetValue(count, Value::BIGINT(row_count == state.row_counts.end() ? 0 : row_count->second));
+			output.data[3].SetValue(count, Value(LogicalType::VARCHAR));
+			output.data[4].SetValue(count, bind_data.format);
+			output.data[5].SetValue(count, bind_data.overwrite ? "recreated" : "created");
+			count++;
+			state.offset++;
+		}
+		SetLdbcGenProgress(&state,
+		                   LdbcGenProgressRange(98.0, 100.0, state.offset, ldbc::LDBCGenWrapper::RelationCount()));
 	} else {
 		while (state.offset < ldbc::LDBCGenWrapper::RelationCount() && count < STANDARD_VECTOR_SIZE) {
 			auto relation_name = ldbc::LDBCGenWrapper::RelationName(state.offset);

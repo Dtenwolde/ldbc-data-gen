@@ -271,6 +271,21 @@ private:
 };
 
 vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
+
+class LdbcKnowsGenerator {
+public:
+	LdbcKnowsGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
+	~LdbcKnowsGenerator();
+
+	bool GenerateNext(idx_t max_blocks = 1);
+	double Progress() const;
+	vector<LdbcKnowsEdge> ReleaseEdges();
+
+private:
+	struct Impl;
+	unique_ptr<Impl> impl;
+};
+
 vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
 
 class LdbcForumGenerator {
