@@ -533,9 +533,11 @@ static void CreateLdbcDeleteTable(ClientContext &context, const LdbcGenBindData 
 	for (auto &key : SplitPrimaryKeyNames(begin->primary_key)) {
 		bool found = false;
 		const auto *column = begin;
-		while (column < LDBC_BI_STATIC_SCHEMA + LdbcSchemaSize() && string(column->relation_name) == begin->relation_name) {
+		while (column < LDBC_BI_STATIC_SCHEMA + LdbcSchemaSize() &&
+		       string(column->relation_name) == begin->relation_name) {
 			if (key == column->column_name) {
-				table_info->columns.AddColumn(ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
+				table_info->columns.AddColumn(
+				    ColumnDefinition(column->column_name, LdbcLogicalType(column->logical_type)));
 				table_info->constraints.push_back(make_uniq<NotNullConstraint>(LogicalIndex(column_index++)));
 				found = true;
 				break;
@@ -543,7 +545,8 @@ static void CreateLdbcDeleteTable(ClientContext &context, const LdbcGenBindData 
 			column++;
 		}
 		if (!found) {
-			throw InternalException("Could not resolve primary key column %s for relation %s", key, begin->relation_name);
+			throw InternalException("Could not resolve primary key column %s for relation %s", key,
+			                        begin->relation_name);
 		}
 	}
 	Catalog::GetCatalog(context, Identifier(bind_data.catalog)).CreateTable(context, std::move(table_info));
@@ -1762,9 +1765,10 @@ private:
 		appender.Append<int32_t>(comment.length);
 		appender.Append<int64_t>(comment.creator_person_id);
 		appender.Append<int64_t>(comment.location_country_id);
-		appender.Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT) : Value::BIGINT(comment.parent_post_id));
+		appender.Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
+		                                             : Value::BIGINT(comment.parent_post_id));
 		appender.Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
-		                                                 : Value::BIGINT(comment.parent_comment_id));
+		                                                : Value::BIGINT(comment.parent_comment_id));
 		appender.EndRow();
 	}
 
@@ -1959,7 +1963,8 @@ private:
 					post_appender->BeginRow();
 					post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
 					post_appender->Append<int64_t>(post.id);
-					post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
+					post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR)
+					                                              : Value(post.image_file));
 					post_appender->Append(Value(post.location_ip));
 					post_appender->Append(Value(post.browser_used));
 					post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
@@ -1972,7 +1977,8 @@ private:
 				}
 				person_counts.posts++;
 				for (auto tag_id : post.tags) {
-					AppendTimestampInt64Int32Row(*post_tag_appender, LdbcTimestampMs(post.creation_date), post.id, tag_id);
+					AppendTimestampInt64Int32Row(*post_tag_appender, LdbcTimestampMs(post.creation_date), post.id,
+					                             tag_id);
 					person_counts.post_tags++;
 				}
 			} else if (IsInsertRow(post.creation_date)) {
@@ -2001,14 +2007,15 @@ private:
 					comment_appender->Append<int64_t>(comment.location_country_id);
 					comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
 					                                                      : Value::BIGINT(comment.parent_post_id));
-					comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
-					                                                         : Value::BIGINT(comment.parent_comment_id));
+					comment_appender->Append(comment.parent_comment_id == -1
+					                             ? Value(LogicalType::BIGINT)
+					                             : Value::BIGINT(comment.parent_comment_id));
 					comment_appender->EndRow();
 				}
 				person_counts.comments++;
 				for (auto tag_id : comment.tags) {
-					AppendTimestampInt64Int32Row(*comment_tag_appender, LdbcTimestampMs(comment.creation_date), comment.id,
-					                             tag_id);
+					AppendTimestampInt64Int32Row(*comment_tag_appender, LdbcTimestampMs(comment.creation_date),
+					                             comment.id, tag_id);
 					person_counts.comment_tags++;
 				}
 			} else if (IsInsertRow(comment.creation_date)) {
@@ -2036,8 +2043,8 @@ private:
 		}
 		for (auto &like : forum.comment_likes) {
 			if (IsSnapshotRow(like.creation_date)) {
-				AppendTimestampInt64Int64Row(*comment_like_appender, LdbcTimestampMs(like.creation_date), like.person_id,
-				                             like.message_id);
+				AppendTimestampInt64Int64Row(*comment_like_appender, LdbcTimestampMs(like.creation_date),
+				                             like.person_id, like.message_id);
 				person_counts.comment_likes++;
 			} else if (IsInsertRow(like.creation_date)) {
 				AppendTimestampInt64Int64Insert("Person_likes_Comment", like.creation_date, like.person_id,
@@ -2195,7 +2202,8 @@ static string LdbcSparkRelationPartPath(ClientContext &context, const LdbcGenBin
                                         const string &operation, const LdbcSchemaColumn &relation) {
 	auto &fs = FileSystem::GetFileSystem(context);
 	auto extension = bind_data.format == "parquet" ? "parquet" : "csv";
-	return fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation), string("part-00000.") + extension);
+	return fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation),
+	                   string("part-00000.") + extension);
 }
 
 static void EnsureLdbcOutputDirectories(ClientContext &context, const LdbcGenBindData &bind_data) {
@@ -2208,11 +2216,14 @@ static void EnsureLdbcOutputDirectories(ClientContext &context, const LdbcGenBin
 			continue;
 		}
 		fs.CreateDirectoriesRecursive(fs.JoinPath(bind_data.output_dir, entity_path.substr(0, slash)));
-		fs.CreateDirectoriesRecursive(LdbcSparkRelationDir(context, bind_data, "initial_snapshot", LdbcRelationAt(relation_index)));
+		fs.CreateDirectoriesRecursive(
+		    LdbcSparkRelationDir(context, bind_data, "initial_snapshot", LdbcRelationAt(relation_index)));
 		if (string(LdbcRelationAt(relation_index).kind) != "static_node") {
-			fs.CreateDirectoriesRecursive(LdbcSparkRelationDir(context, bind_data, "inserts", LdbcRelationAt(relation_index)));
+			fs.CreateDirectoriesRecursive(
+			    LdbcSparkRelationDir(context, bind_data, "inserts", LdbcRelationAt(relation_index)));
 			if (LdbcRelationHasDeletes(LdbcRelationAt(relation_index).relation_name)) {
-				fs.CreateDirectoriesRecursive(LdbcSparkRelationDir(context, bind_data, "deletes", LdbcRelationAt(relation_index)));
+				fs.CreateDirectoriesRecursive(
+				    LdbcSparkRelationDir(context, bind_data, "deletes", LdbcRelationAt(relation_index)));
 			}
 		}
 	}
@@ -2262,7 +2273,8 @@ static string LdbcCreateDeleteTableSQL(const LdbcGenBindData &bind_data, const L
 			column++;
 		}
 		if (!found) {
-			throw InternalException("Could not resolve primary key column %s for relation %s", key, begin->relation_name);
+			throw InternalException("Could not resolve primary key column %s for relation %s", key,
+			                        begin->relation_name);
 		}
 		sql += " NOT NULL";
 	}
@@ -2371,8 +2383,8 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 				if (bind_data.overwrite) {
 					delete_options += ", OVERWRITE TRUE";
 				}
-				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) + " TO " +
-				      SQLString::ToString(delete_path) + " (" + delete_options + ")";
+				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) +
+				      " TO " + SQLString::ToString(delete_path) + " (" + delete_options + ")";
 				ExecuteLdbcSQL(context, sql);
 			}
 		}
@@ -2742,11 +2754,13 @@ static vector<LdbcSchemaMetadataRow> BuildLdbcSchemaMetadataRows(const string &f
 		column_index = 2;
 		for (auto &key : SplitByDelimiter(relation.primary_key, ",")) {
 			row_idx = 0;
-			while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != relation_name) {
+			while (row_idx < LdbcSchemaSize() &&
+			       string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) != relation_name) {
 				row_idx++;
 			}
 			bool found = false;
-			while (row_idx < LdbcSchemaSize() && string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) == relation_name) {
+			while (row_idx < LdbcSchemaSize() &&
+			       string(LDBC_BI_STATIC_SCHEMA[row_idx].relation_name) == relation_name) {
 				auto &column = LDBC_BI_STATIC_SCHEMA[row_idx];
 				if (key == column.column_name) {
 					AddLdbcSchemaMetadataRow(rows, relation, "deletes", delete_path, column_index++, column.column_name,

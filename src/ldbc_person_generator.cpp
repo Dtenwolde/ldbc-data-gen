@@ -1120,8 +1120,8 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 			continue;
 		}
 		auto like_creation = dates.RandomDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE), min_creation, max_creation);
-		int64_t like_deletion = std::min(std::min(membership.person->deletion_date, message.deletion_date),
-		                                 dates.SimulationEnd());
+		int64_t like_deletion =
+		    std::min(std::min(membership.person->deletion_date, message.deletion_date), dates.SimulationEnd());
 		bool explicitly_deleted = false;
 		if (membership.person->message_deleter &&
 		    random_farm.Get(LdbcRandomAspect::DELETION_LIKES).NextDouble() < config.prob_like_deleted) {
@@ -1132,8 +1132,8 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 				continue;
 			}
 			explicitly_deleted = true;
-			like_deletion =
-			    delete_distribution.NextDeleteDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE), min_deletion, max_deletion);
+			like_deletion = delete_distribution.NextDeleteDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE),
+			                                                   min_deletion, max_deletion);
 		}
 		auto &likes = comment_like ? forum.comment_likes : forum.post_likes;
 		likes.push_back({like_creation, like_deletion, explicitly_deleted, membership.person->account_id, message.id});
