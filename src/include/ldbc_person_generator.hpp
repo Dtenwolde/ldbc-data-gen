@@ -9,6 +9,7 @@
 
 #include <array>
 #include <functional>
+#include <memory>
 #include <unordered_map>
 
 namespace duckdb {
@@ -271,6 +272,24 @@ private:
 
 vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
 vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
+
+class LdbcForumGenerator {
+public:
+	LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
+	                   const vector<LdbcKnowsEdge> &knows_edges,
+	                   const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
+	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr);
+	~LdbcForumGenerator();
+
+	bool GenerateNext(idx_t max_persons = 1);
+	double Progress() const;
+	vector<LdbcForum> ReleaseForums();
+
+private:
+	struct Impl;
+	unique_ptr<Impl> impl;
+};
+
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
                                      const vector<LdbcKnowsEdge> &knows_edges,
                                      const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
