@@ -25,6 +25,7 @@
 #include "duckdb/catalog/catalog_search_path.hpp"
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/sql_identifier.hpp"
+#include "duckdb/common/types/date.hpp"
 #include "duckdb/parallel/task_executor.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
 #include "duckdb/main/connection.hpp"
@@ -44,6 +45,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -272,7 +274,17 @@ struct LdbcGenBindData : public TableFunctionData {
 	bool emit_updates = false;
 	bool visible_updates = false;
 	bool direct_forum_parquet = false;
+	bool direct_forum_update_parquet = false;
+	bool forum_update_copy_table_function = false;
+	string forum_update_chunk_token;
 };
+
+struct LdbcForumUpdateChunkRegistryEntry {
+	unordered_map<string, vector<unique_ptr<DataChunk>>> chunks;
+};
+
+static std::mutex ldbc_forum_update_chunk_registry_lock;
+static unordered_map<string, shared_ptr<LdbcForumUpdateChunkRegistryEntry>> ldbc_forum_update_chunk_registry;
 
 class LdbcLoadGenerator;
 
@@ -281,8 +293,15 @@ static idx_t LdbcRelationIndexByName(const string &relation_name);
 static string LdbcSparkRelationBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
                                              const string &operation, const LdbcSchemaColumn &relation,
                                              idx_t block_id);
+static string LdbcSparkRelationPartitionBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                      const string &operation, const LdbcSchemaColumn &relation,
+                                                      const string &partition_value, idx_t block_id);
 static vector<string> LdbcRelationColumnNames(const string &relation_name);
 static vector<LogicalType> LdbcRelationTypes(const string &relation_name);
+static vector<LogicalType> LdbcInsertTypes(const string &relation_name);
+static vector<LogicalType> LdbcDeleteTypes(const string &relation_name);
+static vector<string> LdbcInsertColumnNames(const string &relation_name);
+static vector<string> LdbcDeleteColumnNames(const string &relation_name);
 static void WriteLdbcChunksToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
                                      const vector<string> &names, vector<unique_ptr<DataChunk>> &chunks);
 
@@ -356,6 +375,21 @@ struct LdbcGenSchemaBindData : public TableFunctionData {
 
 struct LdbcGenSchemaGlobalState : public GlobalTableFunctionState {
 	idx_t offset = 0;
+};
+
+struct LdbcForumUpdateChunkBindData : public TableFunctionData {
+	string token;
+	string operation;
+	string relation_name;
+};
+
+struct LdbcForumUpdateChunkGlobalState : public GlobalTableFunctionState {
+	idx_t MaxThreads() const override {
+		return chunks.empty() ? 1 : chunks.size();
+	}
+
+	std::atomic<idx_t> offset {0};
+	vector<unique_ptr<DataChunk>> chunks;
 };
 
 struct LdbcJavaRandomBindData : public TableFunctionData {
@@ -2139,6 +2173,14 @@ private:
 		return bind_data.direct_forum_parquet;
 	}
 
+	bool UseDirectForumUpdateParquet() const {
+		return bind_data.direct_forum_update_parquet;
+	}
+
+	bool UseForumUpdateCopyTableFunction() const {
+		return bind_data.forum_update_copy_table_function;
+	}
+
 	static bool IsForumGeneratedRelation(const string &relation_name) {
 		return relation_name == "Forum" || relation_name == "Forum_hasTag_Tag" ||
 		       relation_name == "Forum_hasMember_Person" || relation_name == "Post" ||
@@ -2393,6 +2435,251 @@ private:
 		WriteSnapshotParquetBlock(block_id, "Person_likes_Comment", batch.comment_likes);
 	}
 
+	static vector<LogicalType> DropPartitionColumn(vector<LogicalType> types) {
+		D_ASSERT(!types.empty());
+		types.erase(types.begin());
+		return types;
+	}
+
+	static vector<string> DropPartitionColumn(vector<string> names) {
+		D_ASSERT(!names.empty());
+		names.erase(names.begin());
+		return names;
+	}
+
+	static unique_ptr<DataChunk> SliceUpdateChunkWithoutBatchId(DataChunk &source, const vector<LogicalType> &types,
+	                                                           const SelectionVector &selection, idx_t count) {
+		auto result = make_uniq<DataChunk>();
+		result->Initialize(Allocator::DefaultAllocator(), types);
+		for (idx_t column_idx = 0; column_idx < types.size(); column_idx++) {
+			result->data[column_idx].Slice(source.data[column_idx + 1], selection, count);
+		}
+		result->SetCardinality(count);
+		return result;
+	}
+
+	void WritePartitionedUpdateParquetBlock(idx_t block_id, const string &operation, const string &relation_name,
+	                                        vector<unique_ptr<DataChunk>> &chunks, vector<LogicalType> table_types,
+	                                        vector<string> table_names) {
+		if (chunks.empty()) {
+			return;
+		}
+		auto relation_index = LdbcRelationIndexByName(relation_name);
+		auto &relation = LdbcRelationAt(relation_index);
+		auto file_types = DropPartitionColumn(std::move(table_types));
+		auto file_names = DropPartitionColumn(std::move(table_names));
+		std::map<int32_t, vector<unique_ptr<DataChunk>>> partition_chunks;
+		for (auto &chunk : chunks) {
+			chunk->Flatten();
+			auto dates = FlatVector::GetData<date_t>(chunk->data[0]);
+			std::map<int32_t, vector<sel_t>> rows_by_partition;
+			for (idx_t row_idx = 0; row_idx < chunk->size(); row_idx++) {
+				rows_by_partition[dates[row_idx].days].push_back(static_cast<sel_t>(row_idx));
+			}
+			for (auto &entry : rows_by_partition) {
+				SelectionVector selection(entry.second.size());
+				for (idx_t selection_idx = 0; selection_idx < entry.second.size(); selection_idx++) {
+					selection.set_index(selection_idx, entry.second[selection_idx]);
+				}
+				partition_chunks[entry.first].push_back(
+				    SliceUpdateChunkWithoutBatchId(*chunk, file_types, selection, entry.second.size()));
+			}
+		}
+		for (auto &entry : partition_chunks) {
+			auto partition_value = Date::ToString(date_t(entry.first));
+			auto path = LdbcSparkRelationPartitionBlockPartPath(context, bind_data, operation, relation, partition_value,
+			                                                    block_id);
+			WriteLdbcChunksToParquet(context, path, file_types, file_names, entry.second);
+		}
+		chunks.clear();
+		chunks.shrink_to_fit();
+	}
+
+	void WriteInsertParquetBlock(idx_t block_id, const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
+		WritePartitionedUpdateParquetBlock(block_id, "inserts", relation_name, chunks, ForumInsertTypes(relation_name),
+		                                   LdbcInsertColumnNames(relation_name));
+	}
+
+	void WriteDeleteParquetBlock(idx_t block_id, const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
+		WritePartitionedUpdateParquetBlock(block_id, "deletes", relation_name, chunks, ForumDeleteTypes(relation_name),
+		                                   LdbcDeleteColumnNames(relation_name));
+	}
+
+	void WriteUpdateParquetRelation(idx_t block_id, const string &operation, const string &relation_name,
+	                                vector<unique_ptr<DataChunk>> &chunks) {
+		if (operation == "inserts") {
+			WriteInsertParquetBlock(block_id, relation_name, chunks);
+		} else if (operation == "deletes") {
+			WriteDeleteParquetBlock(block_id, relation_name, chunks);
+		} else {
+			throw InternalException("Unexpected LDBC update operation: %s", operation);
+		}
+	}
+
+	void WriteForumUpdateParquetBlock(idx_t block_id, ForumChunkBatch &batch) {
+		if (!bind_data.emit_updates) {
+			return;
+		}
+		WriteInsertParquetBlock(block_id, "Forum", batch.insert_forums);
+		WriteInsertParquetBlock(block_id, "Forum_hasTag_Tag", batch.insert_forum_tags);
+		WriteInsertParquetBlock(block_id, "Forum_hasMember_Person", batch.insert_forum_members);
+		WriteInsertParquetBlock(block_id, "Post", batch.insert_posts);
+		WriteInsertParquetBlock(block_id, "Post_hasTag_Tag", batch.insert_post_tags);
+		WriteInsertParquetBlock(block_id, "Comment", batch.insert_comments);
+		WriteInsertParquetBlock(block_id, "Comment_hasTag_Tag", batch.insert_comment_tags);
+		WriteInsertParquetBlock(block_id, "Person_likes_Post", batch.insert_post_likes);
+		WriteInsertParquetBlock(block_id, "Person_likes_Comment", batch.insert_comment_likes);
+		WriteDeleteParquetBlock(block_id, "Forum", batch.delete_forums);
+		WriteDeleteParquetBlock(block_id, "Forum_hasMember_Person", batch.delete_forum_members);
+		WriteDeleteParquetBlock(block_id, "Post", batch.delete_posts);
+		WriteDeleteParquetBlock(block_id, "Comment", batch.delete_comments);
+		WriteDeleteParquetBlock(block_id, "Person_likes_Post", batch.delete_post_likes);
+		WriteDeleteParquetBlock(block_id, "Person_likes_Comment", batch.delete_comment_likes);
+	}
+
+	static void MoveChunks(vector<unique_ptr<DataChunk>> &target, vector<unique_ptr<DataChunk>> &source) {
+		if (source.empty()) {
+			return;
+		}
+		target.reserve(target.size() + source.size());
+		for (auto &chunk : source) {
+			target.push_back(std::move(chunk));
+		}
+		source.clear();
+	}
+
+	void CollectForumUpdateChunks(ForumChunkBatch &batch) {
+		MoveChunks(pending_forum_update_batch.insert_forums, batch.insert_forums);
+		MoveChunks(pending_forum_update_batch.insert_forum_tags, batch.insert_forum_tags);
+		MoveChunks(pending_forum_update_batch.insert_forum_members, batch.insert_forum_members);
+		MoveChunks(pending_forum_update_batch.insert_posts, batch.insert_posts);
+		MoveChunks(pending_forum_update_batch.insert_post_tags, batch.insert_post_tags);
+		MoveChunks(pending_forum_update_batch.insert_comments, batch.insert_comments);
+		MoveChunks(pending_forum_update_batch.insert_comment_tags, batch.insert_comment_tags);
+		MoveChunks(pending_forum_update_batch.insert_post_likes, batch.insert_post_likes);
+		MoveChunks(pending_forum_update_batch.insert_comment_likes, batch.insert_comment_likes);
+		MoveChunks(pending_forum_update_batch.delete_forums, batch.delete_forums);
+		MoveChunks(pending_forum_update_batch.delete_forum_members, batch.delete_forum_members);
+		MoveChunks(pending_forum_update_batch.delete_posts, batch.delete_posts);
+		MoveChunks(pending_forum_update_batch.delete_comments, batch.delete_comments);
+		MoveChunks(pending_forum_update_batch.delete_post_likes, batch.delete_post_likes);
+		MoveChunks(pending_forum_update_batch.delete_comment_likes, batch.delete_comment_likes);
+	}
+
+	class LdbcForumUpdateParquetTask : public BaseExecutorTask {
+	public:
+		LdbcForumUpdateParquetTask(TaskExecutor &executor, LdbcLoadGenerator &loader, idx_t block_id, string operation,
+		                           string relation_name, vector<unique_ptr<DataChunk>> &chunks)
+		    : BaseExecutorTask(executor), loader(loader), block_id(block_id), operation(std::move(operation)),
+		      relation_name(std::move(relation_name)), chunks(chunks) {
+		}
+
+		void ExecuteTask() override {
+			loader.WriteUpdateParquetRelation(block_id, operation, relation_name, chunks);
+		}
+
+		string TaskType() const override {
+			return "LdbcForumUpdateParquetTask";
+		}
+
+	private:
+		LdbcLoadGenerator &loader;
+		idx_t block_id;
+		string operation;
+		string relation_name;
+		vector<unique_ptr<DataChunk>> &chunks;
+	};
+
+	void ScheduleUpdateParquetTask(TaskExecutor &executor, idx_t block_id, const string &operation,
+	                               const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
+		if (chunks.empty()) {
+			return;
+		}
+		executor.ScheduleTask(
+		    make_uniq<LdbcForumUpdateParquetTask>(executor, *this, block_id, operation, relation_name, chunks));
+	}
+
+	void WriteForumUpdateParquetBlockParallel(idx_t block_id, ForumChunkBatch &batch) {
+		if (!bind_data.emit_updates) {
+			return;
+		}
+		TaskExecutor executor(context);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum", batch.insert_forums);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum_hasTag_Tag", batch.insert_forum_tags);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum_hasMember_Person", batch.insert_forum_members);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Post", batch.insert_posts);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Post_hasTag_Tag", batch.insert_post_tags);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Comment", batch.insert_comments);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Comment_hasTag_Tag", batch.insert_comment_tags);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Person_likes_Post", batch.insert_post_likes);
+		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Person_likes_Comment", batch.insert_comment_likes);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Forum", batch.delete_forums);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Forum_hasMember_Person", batch.delete_forum_members);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Post", batch.delete_posts);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Comment", batch.delete_comments);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Person_likes_Post", batch.delete_post_likes);
+		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Person_likes_Comment", batch.delete_comment_likes);
+		executor.WorkOnTasks();
+	}
+
+	void FlushForumUpdateParquet() {
+		if (!UseDirectForumUpdateParquet() || forum_update_parquet_flushed) {
+			return;
+		}
+		auto append_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
+		WriteForumUpdateParquetBlockParallel(0, pending_forum_update_batch);
+		forum_update_parquet_flushed = true;
+		if (LdbcPhaseProfileEnabled()) {
+			auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), append_start);
+			if (delta.wall_ms > 0) {
+				forum_append_chunks_profile.wall_ms += delta.wall_ms;
+				forum_append_chunks_profile.user_ms += delta.user_ms;
+				forum_append_chunks_profile.system_ms += delta.system_ms;
+				forum_append_chunks_profile_calls++;
+			}
+		}
+	}
+
+	static void RegisterUpdateChunks(LdbcForumUpdateChunkRegistryEntry &entry, const string &operation,
+	                                 const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
+		if (chunks.empty()) {
+			return;
+		}
+		entry.chunks[operation + ":" + relation_name] = std::move(chunks);
+	}
+
+	void RegisterForumUpdateChunks() {
+		if (!UseForumUpdateCopyTableFunction() || forum_update_chunks_registered) {
+			return;
+		}
+		if (bind_data.forum_update_chunk_token.empty()) {
+			throw InternalException("Missing LDBC forum update chunk token");
+		}
+		auto entry = make_shared_ptr<LdbcForumUpdateChunkRegistryEntry>();
+		RegisterUpdateChunks(*entry, "inserts", "Forum", pending_forum_update_batch.insert_forums);
+		RegisterUpdateChunks(*entry, "inserts", "Forum_hasTag_Tag", pending_forum_update_batch.insert_forum_tags);
+		RegisterUpdateChunks(*entry, "inserts", "Forum_hasMember_Person",
+		                     pending_forum_update_batch.insert_forum_members);
+		RegisterUpdateChunks(*entry, "inserts", "Post", pending_forum_update_batch.insert_posts);
+		RegisterUpdateChunks(*entry, "inserts", "Post_hasTag_Tag", pending_forum_update_batch.insert_post_tags);
+		RegisterUpdateChunks(*entry, "inserts", "Comment", pending_forum_update_batch.insert_comments);
+		RegisterUpdateChunks(*entry, "inserts", "Comment_hasTag_Tag", pending_forum_update_batch.insert_comment_tags);
+		RegisterUpdateChunks(*entry, "inserts", "Person_likes_Post", pending_forum_update_batch.insert_post_likes);
+		RegisterUpdateChunks(*entry, "inserts", "Person_likes_Comment",
+		                     pending_forum_update_batch.insert_comment_likes);
+		RegisterUpdateChunks(*entry, "deletes", "Forum", pending_forum_update_batch.delete_forums);
+		RegisterUpdateChunks(*entry, "deletes", "Forum_hasMember_Person",
+		                     pending_forum_update_batch.delete_forum_members);
+		RegisterUpdateChunks(*entry, "deletes", "Post", pending_forum_update_batch.delete_posts);
+		RegisterUpdateChunks(*entry, "deletes", "Comment", pending_forum_update_batch.delete_comments);
+		RegisterUpdateChunks(*entry, "deletes", "Person_likes_Post", pending_forum_update_batch.delete_post_likes);
+		RegisterUpdateChunks(*entry, "deletes", "Person_likes_Comment",
+		                     pending_forum_update_batch.delete_comment_likes);
+		std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
+		ldbc_forum_update_chunk_registry[bind_data.forum_update_chunk_token] = std::move(entry);
+		forum_update_chunks_registered = true;
+	}
+
 	void AppendChunks(LdbcChunkAppender &appender, vector<unique_ptr<DataChunk>> &chunks) {
 		for (auto &chunk : chunks) {
 			appender.AppendChunk(*chunk);
@@ -2431,7 +2718,9 @@ private:
 		AppendChunks(*comment_tag_appender, batch.comment_tags);
 		AppendChunks(*post_like_appender, batch.post_likes);
 		AppendChunks(*comment_like_appender, batch.comment_likes);
-		if (bind_data.emit_updates) {
+		if (UseDirectForumUpdateParquet() || UseForumUpdateCopyTableFunction()) {
+			CollectForumUpdateChunks(batch);
+		} else if (bind_data.emit_updates) {
 			AppendInsertChunks("Forum", batch.insert_forums);
 			AppendInsertChunks("Forum_hasTag_Tag", batch.insert_forum_tags);
 			AppendInsertChunks("Forum_hasMember_Person", batch.insert_forum_members);
@@ -2960,6 +3249,9 @@ private:
 				          << (use_prematerialized_chunks ? "true" : "false")
 				          << " block_materialize=" << (use_block_prematerialization ? "true" : "false")
 				          << " direct_forum_parquet=" << (UseDirectForumParquet() ? "true" : "false")
+				          << " direct_forum_update_parquet=" << (UseDirectForumUpdateParquet() ? "true" : "false")
+				          << " forum_update_copy_table_function="
+				          << (UseForumUpdateCopyTableFunction() ? "true" : "false")
 				          << " emit_updates=" << (bind_data.emit_updates ? "true" : "false")
 				          << " chunk_message_appenders=" << (chunk_message_appenders ? "true" : "false") << "\n";
 			}
@@ -3008,6 +3300,11 @@ private:
 			}
 		}
 		if (done) {
+			if (UseForumBlockPrematerialization()) {
+				DrainForumChunkBatches();
+			}
+			FlushForumUpdateParquet();
+			RegisterForumUpdateChunks();
 			SetLdbcGenProgress(&progress_state, 98.0);
 		}
 		return done;
@@ -3248,6 +3545,9 @@ private:
 	std::mutex pending_forum_chunk_batches_lock;
 	unordered_map<idx_t, ForumChunkBatch> pending_forum_chunk_batches;
 	idx_t next_forum_chunk_block = 0;
+	ForumChunkBatch pending_forum_update_batch;
+	bool forum_update_parquet_flushed = false;
+	bool forum_update_chunks_registered = false;
 
 	unique_ptr<InternalAppender> person_appender;
 	unique_ptr<LdbcChunkAppender> interest_appender;
@@ -3347,6 +3647,19 @@ static string LdbcSparkRelationBlockPartPath(ClientContext &context, const LdbcG
 	return fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation), part_name.str());
 }
 
+static string LdbcSparkRelationPartitionBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
+                                                      const string &operation, const LdbcSchemaColumn &relation,
+                                                      const string &partition_value, idx_t block_id) {
+	auto &fs = FileSystem::GetFileSystem(context);
+	auto extension = bind_data.format == "parquet" ? "parquet" : "csv";
+	auto partition_dir =
+	    fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation), "batch_id=" + partition_value);
+	fs.CreateDirectoriesRecursive(partition_dir);
+	std::ostringstream part_name;
+	part_name << "part-" << std::setw(5) << std::setfill('0') << block_id << "." << extension;
+	return fs.JoinPath(partition_dir, part_name.str());
+}
+
 static idx_t LdbcRelationIndexByName(const string &relation_name) {
 	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
 		if (relation_name == LdbcRelationAt(relation_index).relation_name) {
@@ -3384,10 +3697,32 @@ static vector<LogicalType> LdbcRelationTypes(const string &relation_name) {
 	return types;
 }
 
+static vector<LogicalType> LdbcInsertTypes(const string &relation_name) {
+	auto types = LdbcRelationTypes(relation_name);
+	types.insert(types.begin(), LogicalType::DATE);
+	return types;
+}
+
 static vector<string> LdbcInsertColumnNames(const string &relation_name) {
 	auto names = LdbcRelationColumnNames(relation_name);
 	names.insert(names.begin(), "batch_id");
 	return names;
+}
+
+static vector<LogicalType> LdbcDeleteTypes(const string &relation_name) {
+	vector<LogicalType> types {LogicalType::DATE, LogicalType::TIMESTAMP_MS};
+	auto relation_index = LdbcRelationIndexByName(relation_name);
+	for (auto &key : SplitByDelimiter(LdbcRelationAt(relation_index).primary_key, ",")) {
+		auto names = LdbcRelationColumnNames(relation_name);
+		auto relation_types = LdbcRelationTypes(relation_name);
+		for (idx_t column_idx = 0; column_idx < names.size(); column_idx++) {
+			if (names[column_idx] == key) {
+				types.push_back(relation_types[column_idx]);
+				break;
+			}
+		}
+	}
+	return types;
 }
 
 static vector<string> LdbcDeleteColumnNames(const string &relation_name) {
@@ -3596,12 +3931,16 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
 		auto &relation = LdbcRelationAt(relation_index);
 		auto relation_name = string(relation.relation_name);
-		auto direct_forum_snapshot =
+		auto direct_forum_relation =
 		    bind_data.direct_forum_parquet && LdbcDirectForumParquetRelation(relation_name);
-		auto output_path = direct_forum_snapshot ? LdbcSparkRelationDir(context, bind_data, "initial_snapshot", relation)
+		auto direct_forum_updates =
+		    bind_data.direct_forum_update_parquet && LdbcDirectForumParquetRelation(relation_name);
+		auto copy_forum_update_chunks =
+		    bind_data.forum_update_copy_table_function && LdbcDirectForumParquetRelation(relation_name);
+		auto output_path = direct_forum_relation ? LdbcSparkRelationDir(context, bind_data, "initial_snapshot", relation)
 		                                        : LdbcRelationOutputPath(context, bind_data, relation_index);
 		string sql;
-		if (!direct_forum_snapshot) {
+		if (!direct_forum_relation) {
 			sql = "COPY " + LdbcQualifiedTableName(bind_data, relation_name) + " TO " +
 			      SQLString::ToString(output_path) + " (" + overwrite_options + ")";
 			ExecuteLdbcSQL(context, sql);
@@ -3610,14 +3949,21 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 			      SQLString::ToString(spark_snapshot_path) + " (" + overwrite_options + ")";
 			ExecuteLdbcSQL(context, sql);
 		}
-		if (bind_data.emit_updates && string(relation.kind) != "static_node") {
+		if (bind_data.emit_updates && string(relation.kind) != "static_node" && !direct_forum_updates) {
 			auto insert_path = LdbcSparkRelationDir(context, bind_data, "inserts", relation);
 			string insert_options = copy_options + ", PARTITION_BY (batch_id)";
 			if (bind_data.overwrite) {
 				insert_options += ", OVERWRITE TRUE";
 			}
-			sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(bind_data, relation_name)) + " TO " +
-			      SQLString::ToString(insert_path) + " (" + insert_options + ")";
+			if (copy_forum_update_chunks) {
+				sql = "COPY (SELECT * FROM ldbcgen_forum_update_chunks(token := " +
+				      SQLString::ToString(bind_data.forum_update_chunk_token) + ", operation := 'inserts', relation := " +
+				      SQLString::ToString(relation_name) + ")) TO " + SQLString::ToString(insert_path) + " (" +
+				      insert_options + ")";
+			} else {
+				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(bind_data, relation_name)) +
+				      " TO " + SQLString::ToString(insert_path) + " (" + insert_options + ")";
+			}
 			ExecuteLdbcSQL(context, sql);
 			if (LdbcRelationHasDeletes(relation_name)) {
 				auto delete_path = LdbcSparkRelationDir(context, bind_data, "deletes", relation);
@@ -3625,13 +3971,24 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 				if (bind_data.overwrite) {
 					delete_options += ", OVERWRITE TRUE";
 				}
-				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) +
-				      " TO " + SQLString::ToString(delete_path) + " (" + delete_options + ")";
+				if (copy_forum_update_chunks) {
+					sql = "COPY (SELECT * FROM ldbcgen_forum_update_chunks(token := " +
+					      SQLString::ToString(bind_data.forum_update_chunk_token) +
+					      ", operation := 'deletes', relation := " + SQLString::ToString(relation_name) + ")) TO " +
+					      SQLString::ToString(delete_path) + " (" + delete_options + ")";
+				} else {
+					sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) +
+					      " TO " + SQLString::ToString(delete_path) + " (" + delete_options + ")";
+				}
 				ExecuteLdbcSQL(context, sql);
 			}
 		}
 		output_paths[relation_name] = output_path;
 		SetLdbcGenProgress(progress_state, LdbcGenProgressRange(98.0, 100.0, relation_index + 1, LdbcRelationCount()));
+	}
+	if (!bind_data.forum_update_chunk_token.empty()) {
+		std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
+		ldbc_forum_update_chunk_registry.erase(bind_data.forum_update_chunk_token);
 	}
 	return output_paths;
 }
@@ -3721,6 +4078,11 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 	if (result->target == "files" && result->format == "parquet" &&
 	    std::getenv("LDBCGEN_DIRECT_FORUM_PARQUET") != nullptr) {
 		result->direct_forum_parquet = true;
+		if (std::getenv("LDBCGEN_FORUM_UPDATE_COPY_TABLE_FUNCTION") != nullptr) {
+			result->forum_update_copy_table_function = true;
+		} else if (std::getenv("LDBCGEN_DIRECT_FORUM_UPDATE_PARQUET") != nullptr) {
+			result->direct_forum_update_parquet = true;
+		}
 	}
 	if (input.binder && result->target == "tables") {
 		auto &catalog = Catalog::GetCatalog(context, Identifier(result->catalog));
@@ -3819,6 +4181,10 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			state.file_bind_data->overwrite = true;
 			state.file_bind_data->primary_keys = false;
 			state.file_bind_data->emit_updates = true;
+			if (state.file_bind_data->forum_update_copy_table_function) {
+				state.file_bind_data->forum_update_chunk_token =
+				    "__ldbcgen_forum_updates_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
+			}
 			auto &file_context = *state.file_connection->context;
 			if (state.file_bind_data->direct_forum_parquet) {
 				EnsureLdbcOutputDirectories(file_context, *state.file_bind_data);
@@ -3900,6 +4266,64 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		                   LdbcGenProgressRange(98.0, 100.0, state.offset, ldbc::LDBCGenWrapper::RelationCount()));
 	}
 	output.SetCardinality(count);
+}
+
+static unique_ptr<FunctionData> LdbcForumUpdateChunkBind(ClientContext &context, TableFunctionBindInput &input,
+                                                         vector<LogicalType> &return_types, vector<string> &names) {
+	if (!input.inputs.empty()) {
+		throw BinderException("ldbcgen_forum_update_chunks only accepts named parameters");
+	}
+	auto result = make_uniq<LdbcForumUpdateChunkBindData>();
+	result->token = GetStringParameter(input, "token", "");
+	result->operation = StringUtil::Lower(GetStringParameter(input, "operation", ""));
+	result->relation_name = GetStringParameter(input, "relation", "");
+	if (result->token.empty()) {
+		throw BinderException("ldbcgen_forum_update_chunks parameter token must be set");
+	}
+	if (result->operation != "inserts" && result->operation != "deletes") {
+		throw BinderException("ldbcgen_forum_update_chunks parameter operation must be 'inserts' or 'deletes'");
+	}
+	if (!LdbcDirectForumParquetRelation(result->relation_name)) {
+		throw BinderException("ldbcgen_forum_update_chunks relation must be a forum-generated relation");
+	}
+	if (result->operation == "deletes" && !LdbcRelationHasDeletes(result->relation_name)) {
+		throw BinderException("ldbcgen_forum_update_chunks relation does not have deletes");
+	}
+	if (result->operation == "inserts") {
+		names = LdbcInsertColumnNames(result->relation_name);
+		return_types = LdbcInsertTypes(result->relation_name);
+	} else {
+		names = LdbcDeleteColumnNames(result->relation_name);
+		return_types = LdbcDeleteTypes(result->relation_name);
+	}
+	return std::move(result);
+}
+
+static unique_ptr<GlobalTableFunctionState> LdbcForumUpdateChunkInit(ClientContext &context,
+                                                                     TableFunctionInitInput &input) {
+	auto &bind_data = input.bind_data->Cast<LdbcForumUpdateChunkBindData>();
+	auto result = make_uniq<LdbcForumUpdateChunkGlobalState>();
+	auto chunk_key = bind_data.operation + ":" + bind_data.relation_name;
+	std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
+	auto token_entry = ldbc_forum_update_chunk_registry.find(bind_data.token);
+	if (token_entry == ldbc_forum_update_chunk_registry.end()) {
+		throw InvalidInputException("Unknown LDBC forum update chunk token: %s", bind_data.token);
+	}
+	auto chunk_entry = token_entry->second->chunks.find(chunk_key);
+	if (chunk_entry != token_entry->second->chunks.end()) {
+		result->chunks = std::move(chunk_entry->second);
+		token_entry->second->chunks.erase(chunk_entry);
+	}
+	return result;
+}
+
+static void LdbcForumUpdateChunkFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &state = data_p.global_state->Cast<LdbcForumUpdateChunkGlobalState>();
+	auto offset = state.offset.fetch_add(1);
+	if (offset >= state.chunks.size()) {
+		return;
+	}
+	output.Reference(*state.chunks[offset]);
 }
 
 static unique_ptr<FunctionData> LdbcGenSchemaBind(ClientContext &context, TableFunctionBindInput &input,
@@ -4422,6 +4846,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen_schema("ldbcgen_schema", {}, LdbcGenSchemaFunction, LdbcGenSchemaBind, LdbcGenSchemaInit);
 	ldbcgen_schema.named_parameters["format"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(ldbcgen_schema);
+
+	TableFunction ldbcgen_forum_update_chunks("ldbcgen_forum_update_chunks", {}, LdbcForumUpdateChunkFunction,
+	                                          LdbcForumUpdateChunkBind, LdbcForumUpdateChunkInit);
+	ldbcgen_forum_update_chunks.named_parameters["token"] = LogicalType::VARCHAR;
+	ldbcgen_forum_update_chunks.named_parameters["operation"] = LogicalType::VARCHAR;
+	ldbcgen_forum_update_chunks.named_parameters["relation"] = LogicalType::VARCHAR;
+	loader.RegisterFunction(ldbcgen_forum_update_chunks);
 
 	TableFunction ldbcgen_config("ldbcgen_config", {}, LdbcGenConfigFunction, LdbcGenConfigBind, LdbcGenConfigInit);
 	ldbcgen_config.named_parameters["sf"] = LogicalType::DOUBLE;
