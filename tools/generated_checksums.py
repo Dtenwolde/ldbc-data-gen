@@ -87,6 +87,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--schema", default="ldbc_generated_checksums")
     parser.add_argument("--sf", type=float, default=0.003)
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument(
+        "--expected",
+        type=Path,
+        help="CSV manifest of expected relation,rows,checksum values; exits non-zero on mismatch",
+    )
     args = parser.parse_args(argv)
 
     if not args.duckdb.exists():
@@ -104,12 +109,32 @@ def main(argv: list[str]) -> int:
         )
         run_duckdb(args.duckdb, database, setup_sql)
 
-        writer = csv.writer(sys.stdout)
+        actual: dict[str, tuple[int, str]] = {}
+        writer = csv.writer(sys.stdout, lineterminator="\n")
         writer.writerow(["relation", "rows", "checksum"])
         for relation in relations:
             source = f"{quote_ident(args.schema)}.{quote_ident(relation['name'])}"
             row_count, checksum = relation_summary(args.duckdb, database, relation, source)
+            actual[relation["name"]] = (row_count, checksum)
             writer.writerow([relation["name"], row_count, checksum])
+
+    if args.expected:
+        with args.expected.open(newline="", encoding="utf-8") as expected_file:
+            expected = {
+                row["relation"]: (int(row["rows"]), row["checksum"])
+                for row in csv.DictReader(expected_file)
+            }
+        failures: list[str] = []
+        for relation in sorted(set(actual) | set(expected)):
+            if relation not in actual:
+                failures.append(f"{relation}: missing from generated output")
+            elif relation not in expected:
+                failures.append(f"{relation}: missing from expected manifest")
+            elif actual[relation] != expected[relation]:
+                failures.append(f"{relation}: expected {expected[relation]}, got {actual[relation]}")
+        if failures:
+            fail("SF parity mismatch:\n  " + "\n  ".join(failures))
+        print(f"verified {len(actual)} relations against {args.expected}", file=sys.stderr)
 
     return 0
 
