@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -49,6 +50,28 @@ static double LdbcPersonProfileNowMs() {
 	using clock = std::chrono::steady_clock;
 	auto now = clock::now().time_since_epoch();
 	return static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(now).count()) / 1000.0;
+}
+
+static bool LdbcForumBlockProfileEnabled() {
+	static bool enabled = std::getenv("LDBCGEN_FORUM_BLOCK_PROFILE") != nullptr;
+	return enabled;
+}
+
+static idx_t LdbcForumSliceSize() {
+	static idx_t slice_size = []() {
+		auto value = std::getenv("LDBCGEN_FORUM_SLICE_SIZE");
+		if (!value) {
+			return idx_t(0);
+		}
+		auto parsed = std::strtoull(value, nullptr, 10);
+		return NumericCast<idx_t>(parsed);
+	}();
+	return slice_size;
+}
+
+static bool LdbcForumSlicePrepassEnabled() {
+	static bool enabled = std::getenv("LDBCGEN_FORUM_SLICE_PREPASS") != nullptr;
+	return enabled;
 }
 
 class LdbcScopedProfileAccumulator {
@@ -95,6 +118,20 @@ void LdbcRandomGeneratorFarm::Reset(int64_t seed) {
 	LdbcJavaRandom seed_random(53223436LL + 1234567LL * seed);
 	for (auto &generator : generators) {
 		generator.SetSeed(seed_random.NextLong());
+	}
+}
+
+LdbcRandomGeneratorFarm::State LdbcRandomGeneratorFarm::Snapshot() const {
+	State state;
+	for (idx_t index = 0; index < ASPECT_COUNT; index++) {
+		state[index] = generators[index].GetRawSeed();
+	}
+	return state;
+}
+
+void LdbcRandomGeneratorFarm::Restore(const State &state) {
+	for (idx_t index = 0; index < ASPECT_COUNT; index++) {
+		generators[index].SetRawSeed(state[index]);
 	}
 }
 
@@ -993,9 +1030,9 @@ static int32_t GeneratePostBrowser(const LdbcDatagenConfig &config, const LdbcPe
 	return person_browser_id;
 }
 
-static string GeneratePostText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
-                               LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
-                               const vector<int32_t> &tags) {
+static LdbcGeneratedText GeneratePostText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
+                                          LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
+                                          const vector<int32_t> &tags) {
 	unique_ptr<LdbcScopedProfileAccumulator> timer;
 	if (ldbc_forum_profile) {
 		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->post_text_ms);
@@ -1012,9 +1049,9 @@ static string GeneratePostText(const LdbcDatagenConfig &config, const LdbcPerson
 	return dictionaries.tag_text.GenerateText(random, tags, text_size);
 }
 
-static string GenerateCommentText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
-                                  LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
-                                  const vector<int32_t> &tags) {
+static LdbcGeneratedText GenerateCommentText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
+                                             LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
+                                             const vector<int32_t> &tags) {
 	unique_ptr<LdbcScopedProfileAccumulator> timer;
 	if (ldbc_forum_profile) {
 		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->comment_text_ms);
@@ -1183,6 +1220,7 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 		std::set<int32_t> tags;
 		bool is_short = false;
 		string content;
+		int32_t content_length = 0;
 		if (random_farm.Get(LdbcRandomAspect::REDUCED_TEXT).NextDouble() > 0.6666) {
 			vector<int32_t> current_tags;
 			for (auto tag : parent.tags) {
@@ -1202,12 +1240,16 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 				tags.insert(parent.tags[0]);
 			}
 			vector<int32_t> generated_tags(tags.begin(), tags.end());
-			content = GenerateCommentText(config, dictionaries, random_farm, *membership.person, generated_tags);
+			auto generated_text =
+			    GenerateCommentText(config, dictionaries, random_farm, *membership.person, generated_tags);
+			content = std::move(generated_text.content);
+			content_length = generated_text.java_length;
 		} else {
 			is_short = true;
 			auto short_idx =
 			    random_farm.Get(LdbcRandomAspect::TEXT_SIZE).NextInt(NumericCast<int32_t>(LDBC_SHORT_COMMENT_COUNT));
 			content = LDBC_SHORT_COMMENTS[NumericCast<idx_t>(short_idx)];
+			content_length = NumericCast<int32_t>(content.size());
 		}
 
 		auto min_creation = std::max(parent.creation_date, membership.creation_date) + config.delta;
@@ -1250,19 +1292,11 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 		auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 
 		vector<int32_t> comment_tags(tags.begin(), tags.end());
-		int32_t content_length;
-		{
-			unique_ptr<LdbcScopedProfileAccumulator> length_timer;
-			if (ldbc_forum_profile) {
-				length_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->java_string_length_ms);
-			}
-			content_length = LdbcJavaStringLength(content);
-		}
 		auto comment_id = FormActivityId(config, dates, local_message_id++, creation_date, block_id);
 		auto parent_post_id = parent.id == post.id ? parent.id : int64_t(-1);
 		auto parent_comment_id = parent.id == post.id ? int64_t(-1) : parent.id;
 		forum.comments.push_back({creation_date, deletion_date, explicitly_deleted, comment_id, ip_address,
-		                          dictionaries.browsers.GetName(browser_id), content, content_length,
+		                          dictionaries.browsers.GetName(browser_id), std::move(content), content_length,
 		                          membership.person->account_id, country_id, parent_post_id, parent_comment_id,
 		                          comment_tags});
 		LdbcActivityMessage comment {membership.person, comment_id,   post.id,  creation_date,
@@ -1494,15 +1528,8 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
 					}
 				}
 			}
-			auto content = GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tags);
-			int32_t content_length;
-			{
-				unique_ptr<LdbcScopedProfileAccumulator> length_timer;
-				if (ldbc_forum_profile) {
-					length_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->java_string_length_ms);
-				}
-				content_length = LdbcJavaStringLength(content);
-			}
+			auto generated_text = GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tags);
+			auto content_length = generated_text.java_length;
 			if (ChangeUsualCountry(config, random_farm.Get(LdbcRandomAspect::DIFF_IP_FOR_TRAVELER), post_creation)) {
 				auto country_idx = random_farm.Get(LdbcRandomAspect::COUNTRY)
 				                       .NextInt(NumericCast<int32_t>(dictionaries.places.GetCountries().size()));
@@ -1512,15 +1539,16 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "", ip_address,
 				                       dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id), content,
-				                       content_length, membership.person->account_id, forum.id, country_id, post_tags});
+				                       dictionaries.languages.GetLanguageName(forum.language_id),
+				                       std::move(generated_text.content), content_length, membership.person->account_id,
+				                       forum.id, country_id, post_tags});
 			} else {
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
 				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id), content,
-				                       content_length, membership.person->account_id, forum.id,
+				                       dictionaries.languages.GetLanguageName(forum.language_id),
+				                       std::move(generated_text.content), content_length, membership.person->account_id, forum.id,
 				                       membership.person->country_id, post_tags});
 			}
 			auto &emitted_post = forum.posts.back();
@@ -1681,15 +1709,9 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 				post_deletion = std::min(membership.deletion_date, dates.SimulationEnd());
 			}
 			vector<int32_t> post_tag_list(post_tags.begin(), post_tags.end());
-			auto content = GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tag_list);
-			int32_t content_length;
-			{
-				unique_ptr<LdbcScopedProfileAccumulator> length_timer;
-				if (ldbc_forum_profile) {
-					length_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->java_string_length_ms);
-				}
-				content_length = LdbcJavaStringLength(content);
-			}
+			auto generated_text =
+			    GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tag_list);
+			auto content_length = generated_text.java_length;
 			if (ChangeUsualCountry(config, random_farm.Get(LdbcRandomAspect::DIFF_IP_FOR_TRAVELER), post_creation)) {
 				auto country_idx = random_farm.Get(LdbcRandomAspect::COUNTRY)
 				                       .NextInt(NumericCast<int32_t>(dictionaries.places.GetCountries().size()));
@@ -1699,16 +1721,17 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "", ip_address,
 				                       dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id), content,
-				                       content_length, membership.person->account_id, forum.id, country_id,
+				                       dictionaries.languages.GetLanguageName(forum.language_id),
+				                       std::move(generated_text.content), content_length, membership.person->account_id,
+				                       forum.id, country_id,
 				                       post_tag_list});
 			} else {
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
 				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id), content,
-				                       content_length, membership.person->account_id, forum.id,
+				                       dictionaries.languages.GetLanguageName(forum.language_id),
+				                       std::move(generated_text.content), content_length, membership.person->account_id, forum.id,
 				                       membership.person->country_id, post_tag_list});
 			}
 			auto &emitted_post = forum.posts.back();
@@ -1963,9 +1986,11 @@ static bool CreateAlbumForum(const LdbcDatagenConfig &config, const LdbcDateGene
 struct LdbcForumGenerator::Impl {
 	Impl(const LdbcDatagenConfig &config_p, const vector<LdbcPersonCore> &persons_p,
 	     const vector<LdbcKnowsEdge> &knows_edges_p, const std::function<void(LdbcForum &&forum)> &emit_forum_p,
-	     const std::function<void(idx_t done, idx_t total)> &progress_p, idx_t threads_p, ClientContext *context_p)
+	     const std::function<void(idx_t done, idx_t total)> &progress_p, idx_t threads_p, ClientContext *context_p,
+	     const LdbcForumGenerator::BlockCallback &block_callback_p)
 	    : config(config_p), persons(persons_p), knows_edges(knows_edges_p), emit_forum(emit_forum_p),
-	      progress(progress_p), threads(MaxValue<idx_t>(threads_p, 1)), context(context_p), dates(config),
+	      progress(progress_p), threads(MaxValue<idx_t>(threads_p, 1)), context(context_p),
+	      block_callback(block_callback_p), dates(config),
 	      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
 	                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ),
 	      flashmobs(config, dates, dictionaries), flashmob_dates(config.resource_dir),
@@ -2020,16 +2045,45 @@ struct LdbcForumGenerator::Impl {
 		}
 	}
 
+	struct ForumSliceState {
+		idx_t block_id = 0;
+		idx_t block_offset = 0;
+		idx_t global_offset = 0;
+		int64_t local_forum_id = 0;
+		int64_t local_message_id = 0;
+		LdbcRandomGeneratorFarm::State random_state;
+	};
+
 	struct BlockState {
 		idx_t block_id = 0;
 		idx_t block_start = 0;
 		idx_t block_end = 0;
+		double wall_ms = 0;
+		double slice_snapshot_ms = 0;
+		double slice_prepass_ms = 0;
+		bool has_slice_prepass = false;
+		idx_t forum_count = 0;
+		int64_t slice_prepass_final_local_forum_id = 0;
+		int64_t slice_prepass_final_local_message_id = 0;
 		vector<const LdbcPersonCore *> block;
 		vector<LdbcForum> forums;
+		vector<ForumSliceState> slice_states;
 		LdbcRandomGeneratorFarm random_farm;
 		int64_t local_forum_id = 0;
 		int64_t local_message_id = 0;
 		LdbcForumGenerationProfile profile;
+	};
+
+	struct ForumSliceScanResult {
+		idx_t boundary_count = 0;
+		idx_t forum_count = 0;
+		idx_t post_count = 0;
+		idx_t comment_count = 0;
+		int64_t final_local_forum_id = 0;
+		int64_t final_local_message_id = 0;
+		double wall_ms = 0;
+		double snapshot_ms = 0;
+		vector<ForumSliceState> slice_states;
 	};
 
 	~Impl() {
@@ -2091,6 +2145,8 @@ struct LdbcForumGenerator::Impl {
 		}
 
 		for (auto &generated_block : generated_blocks) {
+			PrintBlockProfile(generated_block);
+			PrintSliceProfile(generated_block);
 			MergeForumGenerationProfile(profile, generated_block.profile);
 			for (auto &forum : generated_block.forums) {
 				Emit(std::move(forum));
@@ -2109,6 +2165,68 @@ struct LdbcForumGenerator::Impl {
 			return true;
 		}
 		return false;
+	}
+
+	static void PrintBlockProfile(const BlockState &state) {
+		if (!LdbcForumBlockProfileEnabled()) {
+			return;
+		}
+		std::cerr << "[ldbcgen] forum.block." << state.block_id << ": wall=" << std::fixed << std::setprecision(3)
+		          << state.wall_ms << " ms persons=" << (state.block_end - state.block_start)
+		          << " forums=" << state.forum_count << " posts=" << state.profile.emitted_posts
+		          << " comments=" << state.profile.emitted_comments << " post_likes="
+		          << state.profile.emitted_post_likes << " comment_likes=" << state.profile.emitted_comment_likes
+		          << " memberships=" << state.profile.memberships << "\n";
+	}
+
+	static void PrintSliceProfile(const BlockState &state) {
+		if (LdbcForumSliceSize() == 0) {
+			return;
+		}
+		std::cerr << "[ldbcgen] forum.slice.block." << state.block_id << ": slice_size=" << LdbcForumSliceSize()
+		          << " boundaries=" << state.slice_states.size() << " snapshot=" << std::fixed
+		          << std::setprecision(3) << state.slice_snapshot_ms << " ms prepass=" << state.slice_prepass_ms
+		          << " ms final_local_forum_id=" << state.local_forum_id
+		          << " final_local_message_id=" << state.local_message_id << "\n";
+	}
+
+	static void PrintSlicePrepassProfile(idx_t block_id, const ForumSliceScanResult &scan) {
+		if (LdbcForumSliceSize() == 0) {
+			return;
+		}
+		std::cerr << "[ldbcgen] forum.slice.prepass.block." << block_id << ": slice_size=" << LdbcForumSliceSize()
+		          << " wall=" << std::fixed << std::setprecision(3) << scan.wall_ms
+		          << " ms snapshot=" << scan.snapshot_ms << " ms boundaries=" << scan.boundary_count
+		          << " forums=" << scan.forum_count << " posts=" << scan.post_count
+		          << " comments=" << scan.comment_count
+		          << " final_local_forum_id=" << scan.final_local_forum_id
+		          << " final_local_message_id=" << scan.final_local_message_id << "\n";
+	}
+
+	static void RecordSliceState(vector<ForumSliceState> &slice_states, double &snapshot_ms, idx_t block_id,
+	                             idx_t block_start, idx_t block_offset, const LdbcRandomGeneratorFarm &random_farm,
+	                             int64_t local_forum_id, int64_t local_message_id) {
+		auto start_ms = LdbcPersonProfileNowMs();
+		ForumSliceState state;
+		state.block_id = block_id;
+		state.block_offset = block_offset;
+		state.global_offset = block_start + block_offset;
+		state.local_forum_id = local_forum_id;
+		state.local_message_id = local_message_id;
+		state.random_state = random_farm.Snapshot();
+		slice_states.push_back(std::move(state));
+		snapshot_ms += LdbcPersonProfileNowMs() - start_ms;
+	}
+
+	static bool ShouldRecordSliceBoundary(idx_t block_offset, idx_t block_person_count) {
+		auto slice_size = LdbcForumSliceSize();
+		if (slice_size == 0 || block_offset > block_person_count) {
+			return false;
+		}
+		if (block_offset == block_person_count) {
+			return true;
+		}
+		return (block_offset % slice_size) == 0;
 	}
 
 	double Progress() const {
@@ -2151,7 +2269,7 @@ struct LdbcForumGenerator::Impl {
 		block_start = block_end;
 	}
 
-	BlockState GenerateBlock(idx_t block_index) const {
+	BlockState InitializeBlockState(idx_t block_index) const {
 		BlockState state;
 		state.block_id = block_index;
 		state.block_start = block_index * NumericCast<idx_t>(config.block_size);
@@ -2168,10 +2286,86 @@ struct LdbcForumGenerator::Impl {
 				          return left->account_id < right->account_id;
 			          });
 		}
+		return state;
+	}
+
+	ForumSliceScanResult CollectSliceBoundaries(idx_t block_index) const {
+		auto start_ms = LdbcPersonProfileNowMs();
+		ForumSliceScanResult result;
+		auto state = InitializeBlockState(block_index);
+		auto block_person_count = state.block_end - state.block_start;
 		LdbcForumProfileScope block_profile_scope(state.profile);
-		for (auto person : state.block) {
+		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
+			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
+				RecordSliceState(result.slice_states, result.snapshot_ms, state.block_id, state.block_start,
+				                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
+			}
+			vector<LdbcForum> person_forums;
+			auto person = state.block[person_offset];
+			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
+			              state.local_message_id, state.profile, person_forums);
+			result.forum_count += person_forums.size();
+			for (auto &forum : person_forums) {
+				result.post_count += forum.posts.size();
+				result.comment_count += forum.comments.size();
+			}
+		}
+		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
+			RecordSliceState(result.slice_states, result.snapshot_ms, state.block_id, state.block_start,
+			                 block_person_count, state.random_farm, state.local_forum_id, state.local_message_id);
+		}
+		result.boundary_count = result.slice_states.size();
+		result.final_local_forum_id = state.local_forum_id;
+		result.final_local_message_id = state.local_message_id;
+		result.wall_ms = LdbcPersonProfileNowMs() - start_ms;
+		return result;
+	}
+
+	BlockState GenerateBlock(idx_t block_index) const {
+		auto start_ms = LdbcForumBlockProfileEnabled() ? LdbcPersonProfileNowMs() : 0;
+		auto state = InitializeBlockState(block_index);
+		if (LdbcForumSlicePrepassEnabled() && LdbcForumSliceSize() > 0) {
+			auto scan = CollectSliceBoundaries(block_index);
+			state.has_slice_prepass = true;
+			state.slice_prepass_ms = scan.wall_ms;
+			state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
+			state.slice_prepass_final_local_message_id = scan.final_local_message_id;
+			PrintSlicePrepassProfile(block_index, scan);
+		}
+		auto block_person_count = state.block_end - state.block_start;
+		LdbcForumProfileScope block_profile_scope(state.profile);
+		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
+			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
+				RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
+				                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
+			}
+			auto person = state.block[person_offset];
 			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
 			              state.local_message_id, state.profile, state.forums);
+		}
+		state.forum_count = state.forums.size();
+		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
+			RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
+			                 block_person_count, state.random_farm, state.local_forum_id, state.local_message_id);
+		}
+		if (state.has_slice_prepass &&
+		    (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
+		     state.slice_prepass_final_local_message_id != state.local_message_id)) {
+			throw InternalException("Forum slice prepass diverged for block %llu: prepass ids (%lld, %lld), "
+			                        "generation ids (%lld, %lld)",
+			                        static_cast<unsigned long long>(state.block_id),
+			                        static_cast<long long>(state.slice_prepass_final_local_forum_id),
+			                        static_cast<long long>(state.slice_prepass_final_local_message_id),
+			                        static_cast<long long>(state.local_forum_id),
+			                        static_cast<long long>(state.local_message_id));
+		}
+		if (block_callback) {
+			block_callback(state.block_id, state.block_start, state.block_end, state.forums);
+			state.forums.clear();
+			state.forums.shrink_to_fit();
+		}
+		if (LdbcForumBlockProfileEnabled()) {
+			state.wall_ms = LdbcPersonProfileNowMs() - start_ms;
 		}
 		return state;
 	}
@@ -2376,6 +2570,7 @@ struct LdbcForumGenerator::Impl {
 	std::function<void(idx_t done, idx_t total)> progress;
 	idx_t threads;
 	ClientContext *context;
+	LdbcForumGenerator::BlockCallback block_callback;
 	LdbcForumGenerationProfile profile;
 	LdbcForumGenerationProfile *previous_profile = nullptr;
 	double profile_start = LdbcPersonProfileNowMs();
@@ -2404,8 +2599,8 @@ LdbcForumGenerator::LdbcForumGenerator(const LdbcDatagenConfig &config, const ve
                                        const vector<LdbcKnowsEdge> &knows_edges,
                                        const std::function<void(LdbcForum &&forum)> &emit_forum,
                                        const std::function<void(idx_t done, idx_t total)> &progress, idx_t threads,
-                                       ClientContext *context)
-    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context)) {
+                                       ClientContext *context, const BlockCallback &block_callback)
+    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context, block_callback)) {
 }
 
 LdbcForumGenerator::~LdbcForumGenerator() = default;

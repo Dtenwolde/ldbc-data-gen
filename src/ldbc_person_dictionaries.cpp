@@ -797,10 +797,10 @@ int32_t LdbcTagTextDictionary::GetRandomLargeTextSize(LdbcJavaRandom &random_tex
 	return random_text_size.NextInt(max_size - min_size) + min_size;
 }
 
-string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
-                                           int32_t text_size) const {
+LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size,
+                                                      const vector<int32_t> &tag_ids, int32_t text_size) const {
 	if (tag_ids.empty()) {
-		return "";
+		return {};
 	}
 
 	string result;
@@ -846,8 +846,12 @@ string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, con
 	}
 	if (result_length > text_size) {
 		result = LdbcJavaSubstring(result, 0, text_size - 1);
+		result_length = text_size - 1;
 	}
-	return result.find('|') == string::npos ? result : StringUtil::Replace(result, "|", " ");
+	if (result.find('|') != string::npos) {
+		result = StringUtil::Replace(result, "|", " ");
+	}
+	return {std::move(result), result_length};
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {

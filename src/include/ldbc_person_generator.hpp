@@ -92,13 +92,17 @@ enum class LdbcRandomAspect : uint8_t {
 
 class LdbcRandomGeneratorFarm {
 public:
+	static constexpr idx_t ASPECT_COUNT = static_cast<idx_t>(LdbcRandomAspect::NUM_ASPECT);
+	using State = std::array<uint64_t, ASPECT_COUNT>;
+
 	LdbcRandomGeneratorFarm();
 
 	void Reset(int64_t seed);
+	State Snapshot() const;
+	void Restore(const State &state);
 	LdbcJavaRandom &Get(LdbcRandomAspect aspect);
 
 private:
-	static constexpr idx_t ASPECT_COUNT = static_cast<idx_t>(LdbcRandomAspect::NUM_ASPECT);
 	std::array<LdbcJavaRandom, ASPECT_COUNT> generators;
 };
 
@@ -296,11 +300,14 @@ vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const v
 
 class LdbcForumGenerator {
 public:
+	using BlockCallback =
+	    std::function<void(idx_t block_id, idx_t block_start, idx_t block_end, vector<LdbcForum> &forums)>;
+
 	LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
 	                   const vector<LdbcKnowsEdge> &knows_edges,
 	                   const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
 	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr, idx_t threads = 1,
-	                   ClientContext *context = nullptr);
+	                   ClientContext *context = nullptr, const BlockCallback &block_callback = nullptr);
 	~LdbcForumGenerator();
 
 	bool GenerateNext(idx_t max_persons = 1);

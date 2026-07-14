@@ -15,6 +15,14 @@ void LdbcJavaRandom::SetSeed(int64_t seed_p) {
 	seed = (static_cast<uint64_t>(seed_p) ^ MULTIPLIER) & MASK;
 }
 
+uint64_t LdbcJavaRandom::GetRawSeed() const {
+	return seed;
+}
+
+void LdbcJavaRandom::SetRawSeed(uint64_t raw_seed) {
+	seed = raw_seed & MASK;
+}
+
 int32_t LdbcJavaRandom::Next(int bits) {
 	if (bits <= 0 || bits > 32) {
 		throw InternalException("LdbcJavaRandom::Next bits must be in [1, 32]");
