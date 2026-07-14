@@ -1,0 +1,6582 @@
+{
+  "metadata": {
+    "scale_factor": 1,
+    "spark_datagen_revision": "b3dc986898efac7c1676abba865a30865334922e",
+    "ldbc_bi_revision": "47dd38b40844ecdb0e42e5a610c369535304786d",
+    "ci_postgres_image": "postgres:16.14-bookworm",
+    "spark_dataset_url": "https://datasets.ldbcouncil.org/snb-bi/bi-sf1-composite-merged-fk.tar.zst",
+    "spark_dataset_sha256": "a72938e244e6aa9d99632fcd5065e50c669ecf4d00f60bd162b266df4a7aba13",
+    "parameters_url": "https://datasets.ldbcouncil.org/snb-bi/ldbc-snb-bi-parameters-sf1-to-sf30000.zip",
+    "parameters_sha256": "5552f840729afa2b29e1f78a6bc58c987d081d22e077543b17ee7767d1f74445",
+    "result_source": "PostgreSQL",
+    "postgres_version": "14.20 (Homebrew)"
+  },
+  "cases": [
+    {
+      "query_nr": 1,
+      "variant": "1",
+      "parameters": {
+        "datetime": "2010-06-11T09:21:46.000+00:00"
+      },
+      "results": [
+        {
+          "year": 2010,
+          "isComment": false,
+          "lengthCategory": 2,
+          "messageCount": 5906,
+          "averageMessageLength": 105.26684727395869,
+          "sumMessageLength": 621706,
+          "percentageOfMessages": 0.19830104421985698
+        },
+        {
+          "year": 2010,
+          "isComment": false,
+          "lengthCategory": 3,
+          "messageCount": 688,
+          "averageMessageLength": 202.6627906976744,
+          "sumMessageLength": 139432,
+          "percentageOfMessages": 0.023100426417755095
+        },
+        {
+          "year": 2010,
+          "isComment": true,
+          "lengthCategory": 0,
+          "messageCount": 334,
+          "averageMessageLength": 4.12874251497006,
+          "sumMessageLength": 1379,
+          "percentageOfMessages": 0.011214451196991573
+        },
+        {
+          "year": 2010,
+          "isComment": true,
+          "lengthCategory": 1,
+          "messageCount": 57,
+          "averageMessageLength": 76.59649122807018,
+          "sumMessageLength": 4366,
+          "percentageOfMessages": 0.0019138434677500587
+        },
+        {
+          "year": 2010,
+          "isComment": true,
+          "lengthCategory": 2,
+          "messageCount": 94,
+          "averageMessageLength": 94.35106382978724,
+          "sumMessageLength": 8869,
+          "percentageOfMessages": 0.003156162911728167
+        },
+        {
+          "year": 2010,
+          "isComment": true,
+          "lengthCategory": 3,
+          "messageCount": 5,
+          "averageMessageLength": 171.4,
+          "sumMessageLength": 857,
+          "percentageOfMessages": 0.0001678810059429876
+        }
+      ]
+    },
+    {
+      "query_nr": 2,
+      "variant": "2a",
+      "parameters": {
+        "date": "2010-06-08",
+        "tagClass": "ChristianBishop"
+      },
+      "results": [
+        {
+          "tag.name": "Pope_John_XXIII",
+          "countWindow1": 13,
+          "countWindow2": 36,
+          "diff": 23
+        },
+        {
+          "tag.name": "Pope_Pius_IX",
+          "countWindow1": 19,
+          "countWindow2": 38,
+          "diff": 19
+        },
+        {
+          "tag.name": "Pope_John_Paul_II",
+          "countWindow1": 38,
+          "countWindow2": 54,
+          "diff": 16
+        },
+        {
+          "tag.name": "Pope_Benedict_XVI",
+          "countWindow1": 27,
+          "countWindow2": 40,
+          "diff": 13
+        },
+        {
+          "tag.name": "Pope_Pius_X",
+          "countWindow1": 22,
+          "countWindow2": 25,
+          "diff": 3
+        },
+        {
+          "tag.name": "Pope_Leo_XIII",
+          "countWindow1": 24,
+          "countWindow2": 26,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Paul_VI",
+          "countWindow1": 37,
+          "countWindow2": 35,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Pius_XI",
+          "countWindow1": 20,
+          "countWindow2": 22,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Gregory_I",
+          "countWindow1": 15,
+          "countWindow2": 16,
+          "diff": 1
+        },
+        {
+          "tag.name": "Pope_Gregory_IX",
+          "countWindow1": 1,
+          "countWindow2": 0,
+          "diff": 1
+        },
+        {
+          "tag.name": "Pope_Pius_XII",
+          "countWindow1": 32,
+          "countWindow2": 33,
+          "diff": 1
+        },
+        {
+          "tag.name": "Ambrose",
+          "countWindow1": 1,
+          "countWindow2": 1,
+          "diff": 0
+        },
+        {
+          "tag.name": "Anselm_of_Canterbury",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Augustine_of_Canterbury",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Charles_Borromeo",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "John_Henry_Newman",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Adrian_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_VI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Benedict_XIV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Boniface_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_XI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Eugene_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Eugene_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Gregory_XIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Gregory_XVI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_X",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_XI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_John_Paul_I",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Julius_II",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Leo_I",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Leo_X",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_II",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_VI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Sixtus_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Sixtus_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Urban_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Rowan_Williams",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Thomas_Becket",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        }
+      ]
+    },
+    {
+      "query_nr": 2,
+      "variant": "2b",
+      "parameters": {
+        "date": "2010-06-08",
+        "tagClass": "ChristianBishop"
+      },
+      "results": [
+        {
+          "tag.name": "Pope_John_XXIII",
+          "countWindow1": 13,
+          "countWindow2": 36,
+          "diff": 23
+        },
+        {
+          "tag.name": "Pope_Pius_IX",
+          "countWindow1": 19,
+          "countWindow2": 38,
+          "diff": 19
+        },
+        {
+          "tag.name": "Pope_John_Paul_II",
+          "countWindow1": 38,
+          "countWindow2": 54,
+          "diff": 16
+        },
+        {
+          "tag.name": "Pope_Benedict_XVI",
+          "countWindow1": 27,
+          "countWindow2": 40,
+          "diff": 13
+        },
+        {
+          "tag.name": "Pope_Pius_X",
+          "countWindow1": 22,
+          "countWindow2": 25,
+          "diff": 3
+        },
+        {
+          "tag.name": "Pope_Leo_XIII",
+          "countWindow1": 24,
+          "countWindow2": 26,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Paul_VI",
+          "countWindow1": 37,
+          "countWindow2": 35,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Pius_XI",
+          "countWindow1": 20,
+          "countWindow2": 22,
+          "diff": 2
+        },
+        {
+          "tag.name": "Pope_Gregory_I",
+          "countWindow1": 15,
+          "countWindow2": 16,
+          "diff": 1
+        },
+        {
+          "tag.name": "Pope_Gregory_IX",
+          "countWindow1": 1,
+          "countWindow2": 0,
+          "diff": 1
+        },
+        {
+          "tag.name": "Pope_Pius_XII",
+          "countWindow1": 32,
+          "countWindow2": 33,
+          "diff": 1
+        },
+        {
+          "tag.name": "Ambrose",
+          "countWindow1": 1,
+          "countWindow2": 1,
+          "diff": 0
+        },
+        {
+          "tag.name": "Anselm_of_Canterbury",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Augustine_of_Canterbury",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Charles_Borromeo",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "John_Henry_Newman",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Adrian_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_VI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Alexander_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Benedict_XIV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Boniface_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Clement_XI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Eugene_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Eugene_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Gregory_XIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Gregory_XVI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_X",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Innocent_XI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_John_Paul_I",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Julius_II",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Leo_I",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Leo_X",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_III",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Paul_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_II",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_VI",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Pius_VII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Sixtus_IV",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Sixtus_V",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Pope_Urban_VIII",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Rowan_Williams",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        },
+        {
+          "tag.name": "Thomas_Becket",
+          "countWindow1": 0,
+          "countWindow2": 0,
+          "diff": 0
+        }
+      ]
+    },
+    {
+      "query_nr": 3,
+      "variant": "3",
+      "parameters": {
+        "tagClass": "President",
+        "country": "India"
+      },
+      "results": [
+        {
+          "forum.id": 274877932867,
+          "forum.title": "Wall of Abhishek Sharma",
+          "forum.creationDate": "2010-07-02T08:53:51.585+00:00",
+          "person.id": 4398046517450,
+          "messageCount": 304
+        },
+        {
+          "forum.id": 137438971815,
+          "forum.title": "Wall of A. Khan",
+          "forum.creationDate": "2010-03-07T21:38:52.621+00:00",
+          "person.id": 2199023264350,
+          "messageCount": 235
+        },
+        {
+          "forum.id": 1914,
+          "forum.title": "Wall of Nikhil Khan",
+          "forum.creationDate": "2010-02-03T22:43:44.081+00:00",
+          "person.id": 2239,
+          "messageCount": 190
+        },
+        {
+          "forum.id": 274877935397,
+          "forum.title": "Wall of Prakash Kumar",
+          "forum.creationDate": "2010-05-11T19:32:46.004+00:00",
+          "person.id": 4398046520371,
+          "messageCount": 171
+        },
+        {
+          "forum.id": 962072740087,
+          "forum.title": "Wall of Shweta Kapoor",
+          "forum.creationDate": "2011-04-17T02:52:58.739+00:00",
+          "person.id": 15393162797132,
+          "messageCount": 166
+        },
+        {
+          "forum.id": 274877930308,
+          "forum.title": "Wall of Abhishek Irani",
+          "forum.creationDate": "2010-05-04T17:01:13.785+00:00",
+          "person.id": 4398046514467,
+          "messageCount": 165
+        },
+        {
+          "forum.id": 549756865169,
+          "forum.title": "Wall of K. Sharma",
+          "forum.creationDate": "2010-10-29T16:31:06.428+00:00",
+          "person.id": 8796093030826,
+          "messageCount": 128
+        },
+        {
+          "forum.id": 137438964366,
+          "forum.title": "Wall of Arjun Kumar",
+          "forum.creationDate": "2010-04-09T04:33:54.907+00:00",
+          "person.id": 2199023255976,
+          "messageCount": 112
+        },
+        {
+          "forum.id": 549755852834,
+          "forum.title": "Wall of K. Bose",
+          "forum.creationDate": "2010-10-25T15:49:21.175+00:00",
+          "person.id": 8796093023472,
+          "messageCount": 98
+        },
+        {
+          "forum.id": 412316890868,
+          "forum.title": "Wall of Anupam Reddy",
+          "forum.creationDate": "2010-07-08T14:04:53.603+00:00",
+          "person.id": 6597069767941,
+          "messageCount": 81
+        },
+        {
+          "forum.id": 549755860072,
+          "forum.title": "Wall of Shweta Khan",
+          "forum.creationDate": "2010-09-11T17:20:20.021+00:00",
+          "person.id": 8796093032132,
+          "messageCount": 81
+        },
+        {
+          "forum.id": 1649267530101,
+          "forum.title": "Wall of Aditya Khan",
+          "forum.creationDate": "2012-01-10T21:24:49.085+00:00",
+          "person.id": 26388279067483,
+          "messageCount": 74
+        },
+        {
+          "forum.id": 549755852591,
+          "forum.title": "Wall of A. Kapoor",
+          "forum.creationDate": "2010-09-07T22:49:26.640+00:00",
+          "person.id": 8796093023054,
+          "messageCount": 68
+        },
+        {
+          "forum.id": 687194816787,
+          "forum.title": "Wall of Kunal Kumar",
+          "forum.creationDate": "2010-12-04T22:09:31.234+00:00",
+          "person.id": 10995116281358,
+          "messageCount": 67
+        },
+        {
+          "forum.id": 137438966044,
+          "forum.title": "Wall of Deepak Rao",
+          "forum.creationDate": "2010-03-19T21:29:07.976+00:00",
+          "person.id": 2199023258114,
+          "messageCount": 66
+        },
+        {
+          "forum.id": 5640,
+          "forum.title": "Wall of Arjun Chopra",
+          "forum.creationDate": "2010-01-15T06:56:45.947+00:00",
+          "person.id": 6003,
+          "messageCount": 63
+        },
+        {
+          "forum.id": 687194818301,
+          "forum.title": "Wall of Ashok Kumar",
+          "forum.creationDate": "2010-11-21T09:30:05.764+00:00",
+          "person.id": 10995116284413,
+          "messageCount": 62
+        },
+        {
+          "forum.id": 1374389615660,
+          "forum.title": "Wall of Meera Kapoor",
+          "forum.creationDate": "2011-09-23T11:56:08.941+00:00",
+          "person.id": 21990232559935,
+          "messageCount": 61
+        },
+        {
+          "forum.id": 5046,
+          "forum.title": "Wall of Aditya Nair",
+          "forum.creationDate": "2010-02-01T23:30:26.221+00:00",
+          "person.id": 5320,
+          "messageCount": 60
+        },
+        {
+          "forum.id": 274877928110,
+          "forum.title": "Wall of Rahul Reddy",
+          "forum.creationDate": "2010-06-01T14:42:05.597+00:00",
+          "person.id": 4398046511934,
+          "messageCount": 60
+        }
+      ]
+    },
+    {
+      "query_nr": 4,
+      "variant": "4",
+      "parameters": {
+        "date": "2010-02-12"
+      },
+      "results": [
+        {
+          "person.id": 4398046519825,
+          "person.firstName": "Ahmad Rafiq",
+          "person.lastName": "Akbar",
+          "person.creationDate": "2010-05-23T13:24:43.393+00:00",
+          "messageCount": 1195
+        },
+        {
+          "person.id": 6597069774064,
+          "person.firstName": "Ayesha",
+          "person.lastName": "Ahmed",
+          "person.creationDate": "2010-08-25T11:58:50.853+00:00",
+          "messageCount": 948
+        },
+        {
+          "person.id": 15393162797132,
+          "person.firstName": "Shweta",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2011-04-17T02:52:48.739+00:00",
+          "messageCount": 835
+        },
+        {
+          "person.id": 2199023265231,
+          "person.firstName": "Wei",
+          "person.lastName": "Wang",
+          "person.creationDate": "2010-04-21T01:27:43.705+00:00",
+          "messageCount": 738
+        },
+        {
+          "person.id": 24189255819865,
+          "person.firstName": "Sombat",
+          "person.lastName": "Amarttayakul",
+          "person.creationDate": "2011-11-12T21:04:25.195+00:00",
+          "messageCount": 435
+        },
+        {
+          "person.id": 2199023260815,
+          "person.firstName": "Chen",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-04-27T14:01:48.888+00:00",
+          "messageCount": 402
+        },
+        {
+          "person.id": 10995116284819,
+          "person.firstName": "John",
+          "person.lastName": "Khan",
+          "person.creationDate": "2010-12-24T17:41:09.731+00:00",
+          "messageCount": 382
+        },
+        {
+          "person.id": 2866,
+          "person.firstName": "Eve-Mary Thai",
+          "person.lastName": "Hoang",
+          "person.creationDate": "2010-02-05T03:07:01.196+00:00",
+          "messageCount": 345
+        },
+        {
+          "person.id": 6597069770739,
+          "person.firstName": "Abdul Haris",
+          "person.lastName": "Gallagher",
+          "person.creationDate": "2010-08-29T01:13:55.834+00:00",
+          "messageCount": 292
+        },
+        {
+          "person.id": 28587302329901,
+          "person.firstName": "Shweta",
+          "person.lastName": "Khan",
+          "person.creationDate": "2012-03-30T09:33:32.228+00:00",
+          "messageCount": 261
+        },
+        {
+          "person.id": 15393162799092,
+          "person.firstName": "Ge",
+          "person.lastName": "Wang",
+          "person.creationDate": "2011-03-25T19:48:01.039+00:00",
+          "messageCount": 151
+        },
+        {
+          "person.id": 32985348840714,
+          "person.firstName": "John",
+          "person.lastName": "Singh",
+          "person.creationDate": "2012-07-23T00:06:08.096+00:00",
+          "messageCount": 64
+        },
+        {
+          "person.id": 10995116279311,
+          "person.firstName": "Abhishek",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2010-12-04T19:27:01.714+00:00",
+          "messageCount": 54
+        },
+        {
+          "person.id": 28587302327043,
+          "person.firstName": "A.",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2012-04-19T07:03:33.413+00:00",
+          "messageCount": 48
+        },
+        {
+          "person.id": 32985348841684,
+          "person.firstName": "Jie",
+          "person.lastName": "Zhu",
+          "person.creationDate": "2012-09-02T10:37:26.120+00:00",
+          "messageCount": 48
+        },
+        {
+          "person.id": 4398046518418,
+          "person.firstName": "Yang",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-05-23T19:28:52.655+00:00",
+          "messageCount": 46
+        },
+        {
+          "person.id": 10995116285596,
+          "person.firstName": "Taufik",
+          "person.lastName": "Budjana",
+          "person.creationDate": "2010-12-25T15:16:21.391+00:00",
+          "messageCount": 46
+        },
+        {
+          "person.id": 26388279068970,
+          "person.firstName": "Amit",
+          "person.lastName": "Reddy",
+          "person.creationDate": "2012-02-08T20:18:06.166+00:00",
+          "messageCount": 46
+        },
+        {
+          "person.id": 8796093028172,
+          "person.firstName": "Karan",
+          "person.lastName": "Khan",
+          "person.creationDate": "2010-10-10T03:24:24.860+00:00",
+          "messageCount": 44
+        },
+        {
+          "person.id": 28587302328636,
+          "person.firstName": "Anh",
+          "person.lastName": "Ha",
+          "person.creationDate": "2012-04-12T19:20:15.578+00:00",
+          "messageCount": 44
+        },
+        {
+          "person.id": 28587302329156,
+          "person.firstName": "A.",
+          "person.lastName": "Singh",
+          "person.creationDate": "2012-04-24T09:01:46.435+00:00",
+          "messageCount": 44
+        },
+        {
+          "person.id": 6597069775034,
+          "person.firstName": "Abdul Jamil",
+          "person.lastName": "Qureshi",
+          "person.creationDate": "2010-08-26T20:49:21.329+00:00",
+          "messageCount": 43
+        },
+        {
+          "person.id": 19791209304987,
+          "person.firstName": "John",
+          "person.lastName": "Singh",
+          "person.creationDate": "2011-08-09T05:18:25.450+00:00",
+          "messageCount": 43
+        },
+        {
+          "person.id": 26388279071390,
+          "person.firstName": "Rahul",
+          "person.lastName": "Khan",
+          "person.creationDate": "2012-01-21T02:24:23.843+00:00",
+          "messageCount": 43
+        },
+        {
+          "person.id": 32985348843490,
+          "person.firstName": "Yang",
+          "person.lastName": "Li",
+          "person.creationDate": "2012-07-12T22:09:43.580+00:00",
+          "messageCount": 42
+        },
+        {
+          "person.id": 7937,
+          "person.firstName": "Rahul",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2010-01-23T14:07:41.044+00:00",
+          "messageCount": 41
+        },
+        {
+          "person.id": 2199023261398,
+          "person.firstName": "Nguyen Huu",
+          "person.lastName": "Nguyen",
+          "person.creationDate": "2010-03-07T00:09:13.471+00:00",
+          "messageCount": 41
+        },
+        {
+          "person.id": 26388279074760,
+          "person.firstName": "A.",
+          "person.lastName": "Nair",
+          "person.creationDate": "2012-02-22T23:18:47.392+00:00",
+          "messageCount": 41
+        },
+        {
+          "person.id": 6597069768174,
+          "person.firstName": "Jun",
+          "person.lastName": "He",
+          "person.creationDate": "2010-08-06T22:04:49.717+00:00",
+          "messageCount": 40
+        },
+        {
+          "person.id": 24189255820986,
+          "person.firstName": "Bichang",
+          "person.lastName": "Zhang",
+          "person.creationDate": "2011-11-17T20:02:46.129+00:00",
+          "messageCount": 38
+        },
+        {
+          "person.id": 13194139541713,
+          "person.firstName": "Deepak",
+          "person.lastName": "Singh",
+          "person.creationDate": "2011-01-23T15:36:38.709+00:00",
+          "messageCount": 37
+        },
+        {
+          "person.id": 17592186048064,
+          "person.firstName": "V.",
+          "person.lastName": "Joshi",
+          "person.creationDate": "2011-05-13T06:34:40.153+00:00",
+          "messageCount": 37
+        },
+        {
+          "person.id": 21990232556039,
+          "person.firstName": "Naresh",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2011-10-26T19:55:13.777+00:00",
+          "messageCount": 37
+        },
+        {
+          "person.id": 21990232559111,
+          "person.firstName": "Karan",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2011-10-12T23:23:49.411+00:00",
+          "messageCount": 37
+        },
+        {
+          "person.id": 30786325582458,
+          "person.firstName": "R.",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2012-07-05T05:01:47.042+00:00",
+          "messageCount": 37
+        },
+        {
+          "person.id": 4398046512214,
+          "person.firstName": "Zheng",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-06-22T01:39:52.845+00:00",
+          "messageCount": 36
+        },
+        {
+          "person.id": 6597069773793,
+          "person.firstName": "Jun",
+          "person.lastName": "Wang",
+          "person.creationDate": "2010-07-17T12:38:41.010+00:00",
+          "messageCount": 36
+        },
+        {
+          "person.id": 15393162788923,
+          "person.firstName": "Rahul",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2011-03-10T15:49:01.365+00:00",
+          "messageCount": 36
+        },
+        {
+          "person.id": 17592186054998,
+          "person.firstName": "Manuel",
+          "person.lastName": "Cosio",
+          "person.creationDate": "2011-05-10T02:03:12.983+00:00",
+          "messageCount": 36
+        },
+        {
+          "person.id": 32985348841739,
+          "person.firstName": "Anupam",
+          "person.lastName": "Rao",
+          "person.creationDate": "2012-08-24T03:56:50.790+00:00",
+          "messageCount": 36
+        },
+        {
+          "person.id": 2208,
+          "person.firstName": "Shweta",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2010-01-16T16:40:35.139+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 2199023263560,
+          "person.firstName": "Wuttichai",
+          "person.lastName": "Boy",
+          "person.creationDate": "2010-03-28T18:55:23.334+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 6597069768442,
+          "person.firstName": "Abhishek",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2010-09-01T18:11:31.748+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 17592186051684,
+          "person.firstName": "Abhishek",
+          "person.lastName": "Singh",
+          "person.creationDate": "2011-07-02T11:05:24.354+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 19791209309552,
+          "person.firstName": "Abdul Haris",
+          "person.lastName": "Anwar",
+          "person.creationDate": "2011-07-27T16:59:54.637+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 26388279073421,
+          "person.firstName": "Mirza Kalich",
+          "person.lastName": "Ahmed",
+          "person.creationDate": "2012-02-16T05:07:07.084+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 28587302327725,
+          "person.firstName": "Aama",
+          "person.lastName": "Shrestha",
+          "person.creationDate": "2012-04-09T00:22:34.226+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 30786325580960,
+          "person.firstName": "Duleep",
+          "person.lastName": "Banda",
+          "person.creationDate": "2012-05-15T15:04:55.025+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 30786325581241,
+          "person.firstName": "Jean",
+          "person.lastName": "Arnaud",
+          "person.creationDate": "2012-05-21T14:14:11.353+00:00",
+          "messageCount": 35
+        },
+        {
+          "person.id": 15393162798428,
+          "person.firstName": "Chen",
+          "person.lastName": "Zhang",
+          "person.creationDate": "2011-03-12T01:23:21.165+00:00",
+          "messageCount": 34
+        },
+        {
+          "person.id": 17592186051872,
+          "person.firstName": "John",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2011-06-11T07:51:02.867+00:00",
+          "messageCount": 34
+        },
+        {
+          "person.id": 28587302329829,
+          "person.firstName": "Oleg",
+          "person.lastName": "Chezhina",
+          "person.creationDate": "2012-05-02T11:31:39.054+00:00",
+          "messageCount": 34
+        },
+        {
+          "person.id": 5452,
+          "person.firstName": "Agustiar",
+          "person.lastName": "Balawan",
+          "person.creationDate": "2010-01-04T19:14:27.142+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 2199023264344,
+          "person.firstName": "R.",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2010-04-30T05:24:51.797+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 8796093023211,
+          "person.firstName": "Amir",
+          "person.lastName": "Chen",
+          "person.creationDate": "2010-10-31T01:03:17.379+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 13194139542917,
+          "person.firstName": "Lei",
+          "person.lastName": "Li",
+          "person.creationDate": "2011-01-15T02:09:59.710+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 19791209305377,
+          "person.firstName": "John",
+          "person.lastName": "Singh",
+          "person.creationDate": "2011-07-31T15:48:27.794+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 19791209306643,
+          "person.firstName": "John",
+          "person.lastName": "Sen",
+          "person.creationDate": "2011-07-27T17:48:01.487+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 35184372090954,
+          "person.firstName": "Arun",
+          "person.lastName": "Chopra",
+          "person.creationDate": "2012-10-25T02:12:07.425+00:00",
+          "messageCount": 33
+        },
+        {
+          "person.id": 6597069771115,
+          "person.firstName": "Ami",
+          "person.lastName": "Chatterjee",
+          "person.creationDate": "2010-08-30T16:00:52.716+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 6597069774644,
+          "person.firstName": "Zhang",
+          "person.lastName": "Chen",
+          "person.creationDate": "2010-08-02T13:39:20.452+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 6597069777069,
+          "person.firstName": "Wei",
+          "person.lastName": "Wang",
+          "person.creationDate": "2010-08-06T01:42:36.282+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 13194139543607,
+          "person.firstName": "A.",
+          "person.lastName": "Khan",
+          "person.creationDate": "2011-02-06T23:23:19.378+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 21990232559935,
+          "person.firstName": "Meera",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2011-09-23T11:55:58.941+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 21990232565605,
+          "person.firstName": "Prakash",
+          "person.lastName": "Price",
+          "person.creationDate": "2011-11-06T07:17:04.122+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 26388279076723,
+          "person.firstName": "Deepak",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2012-02-10T18:26:21.335+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 28587302331910,
+          "person.firstName": "Isabel",
+          "person.lastName": "Reyes",
+          "person.creationDate": "2012-04-27T03:16:45.436+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 30786325588075,
+          "person.firstName": "Anupam",
+          "person.lastName": "Rao",
+          "person.creationDate": "2012-06-23T10:16:17.317+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 32985348843444,
+          "person.firstName": "Wei",
+          "person.lastName": "Chen",
+          "person.creationDate": "2012-07-30T09:52:43.390+00:00",
+          "messageCount": 32
+        },
+        {
+          "person.id": 10281,
+          "person.firstName": "James",
+          "person.lastName": "Raghu",
+          "person.creationDate": "2010-01-13T12:20:03.403+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 6597069768018,
+          "person.firstName": "Rahul",
+          "person.lastName": "Singh",
+          "person.creationDate": "2010-07-24T22:08:17.051+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 13194139534180,
+          "person.firstName": "Arjun",
+          "person.lastName": "Khan",
+          "person.creationDate": "2011-01-27T17:05:31.134+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 13194139539554,
+          "person.firstName": "K.",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2011-01-17T09:20:04.865+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 13194139543101,
+          "person.firstName": "Shweta",
+          "person.lastName": "Kapoor",
+          "person.creationDate": "2011-02-09T09:48:05.320+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 19791209302082,
+          "person.firstName": "K.",
+          "person.lastName": "Kumar",
+          "person.creationDate": "2011-09-01T10:14:27.166+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 19791209304789,
+          "person.firstName": "Amit",
+          "person.lastName": "Rao",
+          "person.creationDate": "2011-08-13T06:55:48.125+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 26388279071096,
+          "person.firstName": "Prakash",
+          "person.lastName": "Khan",
+          "person.creationDate": "2012-02-01T00:18:37.691+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 30786325582257,
+          "person.firstName": "Ashok",
+          "person.lastName": "Sharma",
+          "person.creationDate": "2012-05-12T07:08:40.547+00:00",
+          "messageCount": 31
+        },
+        {
+          "person.id": 2435,
+          "person.firstName": "Bibit",
+          "person.lastName": "Balawan",
+          "person.creationDate": "2010-01-23T23:37:20.444+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 2199023261346,
+          "person.firstName": "Peng",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-04-28T01:12:38.381+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 4398046517801,
+          "person.firstName": "Jun",
+          "person.lastName": "Wang",
+          "person.creationDate": "2010-06-01T17:59:47.303+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 8796093029212,
+          "person.firstName": "Jie",
+          "person.lastName": "Zhang",
+          "person.creationDate": "2010-11-01T23:57:40.370+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 15393162789525,
+          "person.firstName": "Albaye Papa",
+          "person.lastName": "Faye",
+          "person.creationDate": "2011-03-22T05:03:56.918+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 21990232561857,
+          "person.firstName": "Paul",
+          "person.lastName": "Clerc",
+          "person.creationDate": "2011-10-22T00:12:31.924+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 26388279076501,
+          "person.firstName": "Chen",
+          "person.lastName": "Li",
+          "person.creationDate": "2012-01-12T20:31:19.036+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 28587302327643,
+          "person.firstName": "Deepak",
+          "person.lastName": "Reddy",
+          "person.creationDate": "2012-03-19T22:38:23.233+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 30786325579031,
+          "person.firstName": "Amir",
+          "person.lastName": "Lee",
+          "person.creationDate": "2012-05-22T16:12:22.233+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 30786325580998,
+          "person.firstName": "John",
+          "person.lastName": "Singh",
+          "person.creationDate": "2012-05-20T13:27:29.263+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 30786325581320,
+          "person.firstName": "Deepak",
+          "person.lastName": "Roy",
+          "person.creationDate": "2012-05-17T11:23:42.909+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 30786325583499,
+          "person.firstName": "Ashok",
+          "person.lastName": "Reddy",
+          "person.creationDate": "2012-05-18T16:26:08.414+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 35184372094081,
+          "person.firstName": "Faisal",
+          "person.lastName": "Malik",
+          "person.creationDate": "2012-09-28T16:29:51.372+00:00",
+          "messageCount": 30
+        },
+        {
+          "person.id": 3903,
+          "person.firstName": "Wei",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-02-03T08:12:07.624+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 2199023258884,
+          "person.firstName": "Peng",
+          "person.lastName": "Chen",
+          "person.creationDate": "2010-03-18T21:51:12.030+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 6597069767028,
+          "person.firstName": "Grigore",
+          "person.lastName": "Bologan",
+          "person.creationDate": "2010-08-19T23:12:33.496+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 6597069772286,
+          "person.firstName": "Arun",
+          "person.lastName": "Rao",
+          "person.creationDate": "2010-08-22T17:43:58.802+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 6597069775770,
+          "person.firstName": "Pol",
+          "person.lastName": "Nath",
+          "person.creationDate": "2010-08-06T17:28:25.712+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 8796093032553,
+          "person.firstName": "Priyanka",
+          "person.lastName": "Singh",
+          "person.creationDate": "2010-10-14T18:38:00.870+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 10995116282430,
+          "person.firstName": "Batong",
+          "person.lastName": "Tran",
+          "person.creationDate": "2011-01-02T03:43:55.824+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 10995116282865,
+          "person.firstName": "Ashok",
+          "person.lastName": "Khan",
+          "person.creationDate": "2010-11-26T06:29:03.990+00:00",
+          "messageCount": 29
+        },
+        {
+          "person.id": 10995116286396,
+          "person.firstName": "Yang",
+          "person.lastName": "Li",
+          "person.creationDate": "2010-12-25T12:16:40.949+00:00",
+          "messageCount": 29
+        }
+      ]
+    },
+    {
+      "query_nr": 5,
+      "variant": "5",
+      "parameters": {
+        "tag": "Sikh_Empire"
+      },
+      "results": [
+        {
+          "person.id": 8796093023472,
+          "replyCount": 2,
+          "likeCount": 176,
+          "messageCount": 1,
+          "score": 1765
+        },
+        {
+          "person.id": 2199023258140,
+          "replyCount": 2,
+          "likeCount": 134,
+          "messageCount": 1,
+          "score": 1345
+        },
+        {
+          "person.id": 4398046515963,
+          "replyCount": 3,
+          "likeCount": 89,
+          "messageCount": 1,
+          "score": 897
+        },
+        {
+          "person.id": 17592186051306,
+          "replyCount": 0,
+          "likeCount": 55,
+          "messageCount": 1,
+          "score": 551
+        },
+        {
+          "person.id": 19791209305553,
+          "replyCount": 1,
+          "likeCount": 52,
+          "messageCount": 2,
+          "score": 524
+        },
+        {
+          "person.id": 21990232561529,
+          "replyCount": 2,
+          "likeCount": 29,
+          "messageCount": 1,
+          "score": 295
+        },
+        {
+          "person.id": 6574,
+          "replyCount": 0,
+          "likeCount": 18,
+          "messageCount": 1,
+          "score": 181
+        },
+        {
+          "person.id": 8796093023990,
+          "replyCount": 7,
+          "likeCount": 16,
+          "messageCount": 1,
+          "score": 175
+        },
+        {
+          "person.id": 13194139533461,
+          "replyCount": 2,
+          "likeCount": 16,
+          "messageCount": 1,
+          "score": 165
+        },
+        {
+          "person.id": 8796093026421,
+          "replyCount": 15,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 32
+        },
+        {
+          "person.id": 21990232557614,
+          "replyCount": 12,
+          "likeCount": 0,
+          "messageCount": 3,
+          "score": 27
+        },
+        {
+          "person.id": 8796093026744,
+          "replyCount": 11,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 23
+        },
+        {
+          "person.id": 24189255813538,
+          "replyCount": 10,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 22
+        },
+        {
+          "person.id": 8796093026743,
+          "replyCount": 5,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 21
+        },
+        {
+          "person.id": 6597069767028,
+          "replyCount": 9,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 20
+        },
+        {
+          "person.id": 21990232562293,
+          "replyCount": 8,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 18
+        },
+        {
+          "person.id": 26388279075120,
+          "replyCount": 3,
+          "likeCount": 1,
+          "messageCount": 2,
+          "score": 18
+        },
+        {
+          "person.id": 2199023264490,
+          "replyCount": 8,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 17
+        },
+        {
+          "person.id": 6597069774335,
+          "replyCount": 8,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 17
+        },
+        {
+          "person.id": 8796093022752,
+          "replyCount": 3,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 17
+        },
+        {
+          "person.id": 28587302326226,
+          "replyCount": 7,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 16
+        },
+        {
+          "person.id": 3451,
+          "replyCount": 7,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 15
+        },
+        {
+          "person.id": 4961,
+          "replyCount": 2,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 15
+        },
+        {
+          "person.id": 19791209301861,
+          "replyCount": 7,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 15
+        },
+        {
+          "person.id": 24189255813464,
+          "replyCount": 7,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 15
+        },
+        {
+          "person.id": 24189255813906,
+          "replyCount": 2,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 15
+        },
+        {
+          "person.id": 4398046513670,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 6597069776679,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 10995116280719,
+          "replyCount": 1,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 10995116287958,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 13194139541085,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 21990232556570,
+          "replyCount": 1,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 21990232561742,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 21990232565214,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 26388279072028,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 35184372092938,
+          "replyCount": 6,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 13
+        },
+        {
+          "person.id": 361,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 7244,
+          "replyCount": 0,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 8892,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 4398046517444,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 8796093030183,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 10995116279521,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 13194139541181,
+          "replyCount": 0,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 13194139541221,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 13194139541373,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 15393162794711,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 21990232561531,
+          "replyCount": 0,
+          "likeCount": 1,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 32985348839886,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 35184372091084,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 35184372098900,
+          "replyCount": 5,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 11
+        },
+        {
+          "person.id": 5099,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 10
+        },
+        {
+          "person.id": 17592186045301,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 10
+        },
+        {
+          "person.id": 2199023259253,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 4398046520094,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 6597069767319,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 6597069767925,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 8796093027822,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 8796093030655,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 10995116283381,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 10995116283874,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 13194139535015,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 15393162797132,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 17592186046214,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 17592186053687,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 19791209306158,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 21990232556400,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 21990232561740,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 30786325581075,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 32985348837969,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 35184372098666,
+          "replyCount": 4,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 9
+        },
+        {
+          "person.id": 4398046519516,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 8
+        },
+        {
+          "person.id": 3819,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 6394,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 8726,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 8796093025681,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 8796093027283,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 8796093032299,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 10995116283026,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 17592186044948,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 17592186047799,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 17592186048641,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 19791209302281,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 21990232560723,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 24189255817882,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 26388279073672,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 26388279073849,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 26388279074975,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 26388279075052,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 28587302324452,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 30786325580327,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 32985348841715,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 35184372094081,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 35184372099063,
+          "replyCount": 3,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 7
+        },
+        {
+          "person.id": 24189255812191,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 2,
+          "score": 6
+        },
+        {
+          "person.id": 217,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        },
+        {
+          "person.id": 2174,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        },
+        {
+          "person.id": 8018,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        },
+        {
+          "person.id": 2199023258226,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        },
+        {
+          "person.id": 2199023261155,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        },
+        {
+          "person.id": 2199023262487,
+          "replyCount": 2,
+          "likeCount": 0,
+          "messageCount": 1,
+          "score": 5
+        }
+      ]
+    },
+    {
+      "query_nr": 6,
+      "variant": "6",
+      "parameters": {
+        "tag": "Bob_Geldof"
+      },
+      "results": [
+        {
+          "person1.id": 10995116278639,
+          "authorityScore": 65214
+        },
+        {
+          "person1.id": 21990232559802,
+          "authorityScore": 51479
+        },
+        {
+          "person1.id": 32985348837247,
+          "authorityScore": 50946
+        },
+        {
+          "person1.id": 21990232556992,
+          "authorityScore": 39017
+        },
+        {
+          "person1.id": 26388279074760,
+          "authorityScore": 39017
+        },
+        {
+          "person1.id": 32985348842998,
+          "authorityScore": 39017
+        },
+        {
+          "person1.id": 17592186047799,
+          "authorityScore": 30823
+        },
+        {
+          "person1.id": 21990232558345,
+          "authorityScore": 27912
+        },
+        {
+          "person1.id": 2199023263408,
+          "authorityScore": 20476
+        },
+        {
+          "person1.id": 2199023262183,
+          "authorityScore": 17492
+        },
+        {
+          "person1.id": 10995116282476,
+          "authorityScore": 16881
+        },
+        {
+          "person1.id": 24189255818812,
+          "authorityScore": 15441
+        },
+        {
+          "person1.id": 19791209306646,
+          "authorityScore": 9344
+        },
+        {
+          "person1.id": 17592186054552,
+          "authorityScore": 6769
+        },
+        {
+          "person1.id": 21990232557756,
+          "authorityScore": 5222
+        },
+        {
+          "person1.id": 24189255813105,
+          "authorityScore": 2204
+        },
+        {
+          "person1.id": 28587302330494,
+          "authorityScore": 2204
+        },
+        {
+          "person1.id": 15393162793576,
+          "authorityScore": 1699
+        },
+        {
+          "person1.id": 10995116286814,
+          "authorityScore": 1674
+        },
+        {
+          "person1.id": 26388279073722,
+          "authorityScore": 1559
+        },
+        {
+          "person1.id": 6597069771930,
+          "authorityScore": 856
+        },
+        {
+          "person1.id": 19791209310240,
+          "authorityScore": 831
+        },
+        {
+          "person1.id": 24189255816982,
+          "authorityScore": 815
+        },
+        {
+          "person1.id": 7402,
+          "authorityScore": 802
+        },
+        {
+          "person1.id": 21990232564251,
+          "authorityScore": 683
+        },
+        {
+          "person1.id": 15393162796905,
+          "authorityScore": 643
+        },
+        {
+          "person1.id": 10995116283030,
+          "authorityScore": 327
+        },
+        {
+          "person1.id": 6597069774064,
+          "authorityScore": 318
+        },
+        {
+          "person1.id": 13194139537210,
+          "authorityScore": 233
+        },
+        {
+          "person1.id": 4398046518031,
+          "authorityScore": 199
+        },
+        {
+          "person1.id": 24189255818900,
+          "authorityScore": 199
+        },
+        {
+          "person1.id": 4398046514439,
+          "authorityScore": 182
+        },
+        {
+          "person1.id": 30786325580499,
+          "authorityScore": 150
+        },
+        {
+          "person1.id": 15393162789011,
+          "authorityScore": 91
+        },
+        {
+          "person1.id": 2199023260638,
+          "authorityScore": 63
+        },
+        {
+          "person1.id": 261,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 358,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2239,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2565,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2662,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2735,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 3283,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 3470,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4478,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4857,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6444,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 7139,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 7780,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 9533,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 9802,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 9874,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 9995,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023255976,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023256108,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023256625,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023256642,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023256826,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023257601,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023257639,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023257807,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023258092,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023258884,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023259874,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023260517,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023260815,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023261231,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023261845,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023263286,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023263756,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023264003,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023264490,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 2199023265878,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046511484,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046512578,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046512589,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046513036,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046513439,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046514321,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046514865,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046515379,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046517444,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046518040,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046519441,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046519890,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046519964,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046521053,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 4398046521089,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069768666,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069768950,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069768955,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069769047,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069769684,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069771425,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069771666,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069773566,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069773673,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069774528,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069776460,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 6597069776679,
+          "authorityScore": 0
+        },
+        {
+          "person1.id": 8796093022752,
+          "authorityScore": 0
+        }
+      ]
+    },
+    {
+      "query_nr": 7,
+      "variant": "7",
+      "parameters": {
+        "tag": "Slovenia"
+      },
+      "results": [
+        {
+          "relatedTag.name": "Humayun",
+          "count": 10
+        },
+        {
+          "relatedTag.name": "Genghis_Khan",
+          "count": 9
+        },
+        {
+          "relatedTag.name": "Muammar_Gaddafi",
+          "count": 9
+        },
+        {
+          "relatedTag.name": "Sammy_Sosa",
+          "count": 8
+        },
+        {
+          "relatedTag.name": "Thomas_Hardy",
+          "count": 7
+        },
+        {
+          "relatedTag.name": "Dalai_Lama",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Fernando_González",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Haile_Selassie_I",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Mariano_Rivera",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Peter_Hain",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Ronald_Reagan",
+          "count": 6
+        },
+        {
+          "relatedTag.name": "Bertrand_Russell",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Bill_Clinton",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Bob_Dole",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Diana,_Princess_of_Wales",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Dimitri_Tiomkin",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Duchy_of_Warsaw",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Dustin_Hoffman",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Gerald_Ford",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Indonesia",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Julius_Caesar",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Monaco",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Netherlands",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Nicaragua",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Poland",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Sierra_Leone",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Silvio_Berlusconi",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Soviet_Union",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Sudan",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Tiger_Woods",
+          "count": 5
+        },
+        {
+          "relatedTag.name": "Albert_Einstein",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Arthur_Wellesley,_1st_Duke_of_Wellington",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Australia",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Axis_powers",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Batavian_Republic",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Bosnia_and_Herzegovina",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Clark_Gable",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Colin_Powell",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Edward_IV_of_England",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Elizabeth_II",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Etruscan_civilization",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Fidel_Castro",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Freddie_Mercury",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "George_Gershwin",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "German_Empire",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Ghana",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Greece",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Gustav_Mahler",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Imelda_Marcos",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "India",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "James_Buchanan",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Joseph_Stalin",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Leo_Tolstoy",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Lewis_Carroll",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Louis_Philippe_I",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Martin_Luther",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Martin_Luther_King,_Jr.",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Montenegro",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Monty_Python",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Moon_River",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Nicolas_Sarkozy",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Puerto_Rico",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Raphael",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Richard_Rodgers",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Rwanda",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Saint_Pierre_and_Miquelon",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Samuel_Pepys",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "The_Bahamas",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Tori_Amos",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Turks_and_Caicos_Islands",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Under_Pressure",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Vatican_City",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Vladimir_Lenin",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Wales",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "William_McKinley",
+          "count": 4
+        },
+        {
+          "relatedTag.name": "Abraham_Lincoln",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Al_Gore",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Alfred,_Lord_Tennyson",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Algeria",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Andy_Roddick",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Aristophanes",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Azad_Hind",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Baby,_I_Love_Your_Way",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Bangladesh",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Batman",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Bill_Cosby",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Bing_Crosby",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Bolivia",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "British_North_America",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "British_Overseas_Territories",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Burma",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Carl_Gustaf_Emil_Mannerheim",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Cecil_B._DeMille",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Charles,_Prince_of_Wales",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Charles_de_Gaulle",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Charlton_Heston",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Christina_Aguilera",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Christopher_Lee",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Chuck_Berry",
+          "count": 3
+        },
+        {
+          "relatedTag.name": "Chulalongkorn",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "query_nr": 8,
+      "variant": "8a",
+      "parameters": {
+        "tag": "Abbas_I_of_Persia",
+        "startDate": "2010-06-14",
+        "endDate": "2010-06-28"
+      },
+      "results": [
+        {
+          "person.id": 15393162796516,
+          "score": 100,
+          "friendsScore": 2304
+        },
+        {
+          "person.id": 10995116284819,
+          "score": 100,
+          "friendsScore": 2202
+        },
+        {
+          "person.id": 4398046514439,
+          "score": 101,
+          "friendsScore": 2102
+        },
+        {
+          "person.id": 8796093028727,
+          "score": 100,
+          "friendsScore": 2101
+        },
+        {
+          "person.id": 28587302329901,
+          "score": 100,
+          "friendsScore": 2001
+        },
+        {
+          "person.id": 15393162797781,
+          "score": 100,
+          "friendsScore": 1902
+        },
+        {
+          "person.id": 8796093029396,
+          "score": 100,
+          "friendsScore": 1901
+        },
+        {
+          "person.id": 6597069771580,
+          "score": 100,
+          "friendsScore": 1900
+        },
+        {
+          "person.id": 15393162796938,
+          "score": 100,
+          "friendsScore": 1803
+        },
+        {
+          "person.id": 10995116287504,
+          "score": 100,
+          "friendsScore": 1801
+        },
+        {
+          "person.id": 8796093027051,
+          "score": 100,
+          "friendsScore": 1800
+        },
+        {
+          "person.id": 21990232558345,
+          "score": 100,
+          "friendsScore": 1703
+        },
+        {
+          "person.id": 17592186051103,
+          "score": 100,
+          "friendsScore": 1601
+        },
+        {
+          "person.id": 19791209301605,
+          "score": 100,
+          "friendsScore": 1600
+        },
+        {
+          "person.id": 28587302324075,
+          "score": 100,
+          "friendsScore": 1600
+        },
+        {
+          "person.id": 2199023255976,
+          "score": 102,
+          "friendsScore": 1501
+        },
+        {
+          "person.id": 24189255814035,
+          "score": 100,
+          "friendsScore": 1500
+        },
+        {
+          "person.id": 8796093024055,
+          "score": 100,
+          "friendsScore": 1402
+        },
+        {
+          "person.id": 32985348842801,
+          "score": 100,
+          "friendsScore": 1402
+        },
+        {
+          "person.id": 30786325582257,
+          "score": 100,
+          "friendsScore": 1401
+        },
+        {
+          "person.id": 21990232560968,
+          "score": 100,
+          "friendsScore": 1400
+        },
+        {
+          "person.id": 19791209301779,
+          "score": 100,
+          "friendsScore": 1301
+        },
+        {
+          "person.id": 28587302331208,
+          "score": 100,
+          "friendsScore": 1200
+        },
+        {
+          "person.id": 30786325582458,
+          "score": 100,
+          "friendsScore": 1200
+        },
+        {
+          "person.id": 2199023260693,
+          "score": 100,
+          "friendsScore": 1103
+        },
+        {
+          "person.id": 30786325586956,
+          "score": 100,
+          "friendsScore": 1101
+        },
+        {
+          "person.id": 28587302330254,
+          "score": 100,
+          "friendsScore": 1100
+        },
+        {
+          "person.id": 6597069769336,
+          "score": 100,
+          "friendsScore": 1003
+        },
+        {
+          "person.id": 21990232556992,
+          "score": 100,
+          "friendsScore": 1000
+        },
+        {
+          "person.id": 21990232564593,
+          "score": 100,
+          "friendsScore": 1000
+        },
+        {
+          "person.id": 24189255814629,
+          "score": 100,
+          "friendsScore": 1000
+        },
+        {
+          "person.id": 26388279073300,
+          "score": 100,
+          "friendsScore": 1000
+        },
+        {
+          "person.id": 10995116281487,
+          "score": 100,
+          "friendsScore": 902
+        },
+        {
+          "person.id": 26388279074645,
+          "score": 100,
+          "friendsScore": 901
+        },
+        {
+          "person.id": 28587302330225,
+          "score": 100,
+          "friendsScore": 900
+        },
+        {
+          "person.id": 32985348842020,
+          "score": 100,
+          "friendsScore": 900
+        },
+        {
+          "person.id": 30786325582484,
+          "score": 100,
+          "friendsScore": 802
+        },
+        {
+          "person.id": 9104,
+          "score": 100,
+          "friendsScore": 703
+        },
+        {
+          "person.id": 4398046514572,
+          "score": 100,
+          "friendsScore": 703
+        },
+        {
+          "person.id": 30786325587534,
+          "score": 100,
+          "friendsScore": 701
+        },
+        {
+          "person.id": 13194139541181,
+          "score": 100,
+          "friendsScore": 700
+        },
+        {
+          "person.id": 15393162794315,
+          "score": 100,
+          "friendsScore": 600
+        },
+        {
+          "person.id": 32985348842546,
+          "score": 100,
+          "friendsScore": 502
+        },
+        {
+          "person.id": 21990232564402,
+          "score": 100,
+          "friendsScore": 500
+        },
+        {
+          "person.id": 2199023257012,
+          "score": 100,
+          "friendsScore": 404
+        },
+        {
+          "person.id": 28587302328411,
+          "score": 100,
+          "friendsScore": 400
+        },
+        {
+          "person.id": 32985348843709,
+          "score": 100,
+          "friendsScore": 400
+        },
+        {
+          "person.id": 4398046511722,
+          "score": 102,
+          "friendsScore": 300
+        },
+        {
+          "person.id": 13194139541245,
+          "score": 100,
+          "friendsScore": 302
+        },
+        {
+          "person.id": 15393162797039,
+          "score": 100,
+          "friendsScore": 201
+        },
+        {
+          "person.id": 35184372096631,
+          "score": 100,
+          "friendsScore": 200
+        },
+        {
+          "person.id": 37383395346899,
+          "score": 100,
+          "friendsScore": 200
+        },
+        {
+          "person.id": 8698,
+          "score": 101,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 24189255811121,
+          "score": 100,
+          "friendsScore": 101
+        },
+        {
+          "person.id": 28587302329837,
+          "score": 100,
+          "friendsScore": 101
+        },
+        {
+          "person.id": 4091,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 4398046517503,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 13194139537876,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 30786325582666,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 32985348841739,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 35184372095947,
+          "score": 100,
+          "friendsScore": 100
+        },
+        {
+          "person.id": 5671,
+          "score": 101,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 9475,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023255573,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023258115,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023258475,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023259981,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023261409,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023263186,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023265455,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 4398046519791,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 4398046519912,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 4398046519918,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 4398046519949,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 6597069769432,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 6597069770566,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 13194139543653,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 15393162795159,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 15393162798002,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 21990232558087,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 21990232559362,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 24189255815070,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 26388279069740,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 26388279074274,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 28587302331312,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 30786325584433,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 32985348836171,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 32985348839448,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 35184372097346,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 37383395348360,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 37383395353132,
+          "score": 100,
+          "friendsScore": 0
+        }
+      ]
+    },
+    {
+      "query_nr": 8,
+      "variant": "8b",
+      "parameters": {
+        "tag": "1962–1966",
+        "startDate": "2010-06-14",
+        "endDate": "2010-06-28"
+      },
+      "results": [
+        {
+          "person.id": 4398046514874,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 15393162791594,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 28587302323109,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 28587302327717,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 35184372094729,
+          "score": 100,
+          "friendsScore": 0
+        },
+        {
+          "person.id": 2199023259320,
+          "score": 1,
+          "friendsScore": 0
+        }
+      ]
+    },
+    {
+      "query_nr": 9,
+      "variant": "9",
+      "parameters": {
+        "startDate": "2012-08-30",
+        "endDate": "2012-12-10"
+      },
+      "results": [
+        {
+          "person.id": 8796093032299,
+          "person.firstName": "Robert",
+          "person.lastName": "Brown",
+          "threadCount": 144,
+          "messageCount": 2001
+        },
+        {
+          "person.id": 26388279073672,
+          "person.firstName": "Andrei",
+          "person.lastName": "Condariuc",
+          "threadCount": 187,
+          "messageCount": 1386
+        },
+        {
+          "person.id": 24189255815615,
+          "person.firstName": "Dan",
+          "person.lastName": "Andersson",
+          "threadCount": 127,
+          "messageCount": 1258
+        },
+        {
+          "person.id": 10995116284458,
+          "person.firstName": "Mark",
+          "person.lastName": "Coetzee",
+          "threadCount": 97,
+          "messageCount": 1145
+        },
+        {
+          "person.id": 24189255811663,
+          "person.firstName": "Chris",
+          "person.lastName": "Hall",
+          "threadCount": 198,
+          "messageCount": 1091
+        },
+        {
+          "person.id": 28587302329167,
+          "person.firstName": "Samir",
+          "person.lastName": "Al-Fayez",
+          "threadCount": 272,
+          "messageCount": 1085
+        },
+        {
+          "person.id": 6597069774064,
+          "person.firstName": "Ayesha",
+          "person.lastName": "Ahmed",
+          "threadCount": 130,
+          "messageCount": 1057
+        },
+        {
+          "person.id": 15393162797132,
+          "person.firstName": "Shweta",
+          "person.lastName": "Kapoor",
+          "threadCount": 115,
+          "messageCount": 940
+        },
+        {
+          "person.id": 30786325579605,
+          "person.firstName": "Jorge",
+          "person.lastName": "Gonzalez",
+          "threadCount": 75,
+          "messageCount": 924
+        },
+        {
+          "person.id": 10995116284554,
+          "person.firstName": "Ali",
+          "person.lastName": "Lo",
+          "threadCount": 69,
+          "messageCount": 806
+        },
+        {
+          "person.id": 28587302323380,
+          "person.firstName": "Alexander",
+          "person.lastName": "Hleb",
+          "threadCount": 103,
+          "messageCount": 804
+        },
+        {
+          "person.id": 28587302326380,
+          "person.firstName": "Sam",
+          "person.lastName": "Carter",
+          "threadCount": 80,
+          "messageCount": 749
+        },
+        {
+          "person.id": 4398046519825,
+          "person.firstName": "Ahmad Rafiq",
+          "person.lastName": "Akbar",
+          "threadCount": 104,
+          "messageCount": 723
+        },
+        {
+          "person.id": 8796093030850,
+          "person.firstName": "Monja",
+          "person.lastName": "Tsiranana",
+          "threadCount": 98,
+          "messageCount": 709
+        },
+        {
+          "person.id": 15393162792602,
+          "person.firstName": "Francisco",
+          "person.lastName": "Gonzalez",
+          "threadCount": 92,
+          "messageCount": 708
+        },
+        {
+          "person.id": 17592186045301,
+          "person.firstName": "Rudolf",
+          "person.lastName": "Engel",
+          "threadCount": 53,
+          "messageCount": 701
+        },
+        {
+          "person.id": 13194139535893,
+          "person.firstName": "Benedict",
+          "person.lastName": "Wang",
+          "threadCount": 55,
+          "messageCount": 700
+        },
+        {
+          "person.id": 19791209306158,
+          "person.firstName": "Bobby",
+          "person.lastName": "Garcia",
+          "threadCount": 61,
+          "messageCount": 697
+        },
+        {
+          "person.id": 32985348835002,
+          "person.firstName": "Bingbing",
+          "person.lastName": "Liu",
+          "threadCount": 88,
+          "messageCount": 695
+        },
+        {
+          "person.id": 19791209304449,
+          "person.firstName": "Peng",
+          "person.lastName": "Li",
+          "threadCount": 46,
+          "messageCount": 684
+        },
+        {
+          "person.id": 2199023265458,
+          "person.firstName": "Peter",
+          "person.lastName": "Hall",
+          "threadCount": 75,
+          "messageCount": 658
+        },
+        {
+          "person.id": 21990232559659,
+          "person.firstName": "Baruch",
+          "person.lastName": "Dego",
+          "threadCount": 109,
+          "messageCount": 629
+        },
+        {
+          "person.id": 8796093030826,
+          "person.firstName": "K.",
+          "person.lastName": "Sharma",
+          "threadCount": 92,
+          "messageCount": 626
+        },
+        {
+          "person.id": 26388279070147,
+          "person.firstName": "George",
+          "person.lastName": "Nagy",
+          "threadCount": 74,
+          "messageCount": 623
+        },
+        {
+          "person.id": 24189255814889,
+          "person.firstName": "Jun",
+          "person.lastName": "Zhang",
+          "threadCount": 79,
+          "messageCount": 602
+        },
+        {
+          "person.id": 24189255819865,
+          "person.firstName": "Sombat",
+          "person.lastName": "Amarttayakul",
+          "threadCount": 74,
+          "messageCount": 569
+        },
+        {
+          "person.id": 8478,
+          "person.firstName": "James",
+          "person.lastName": "Moore",
+          "threadCount": 44,
+          "messageCount": 559
+        },
+        {
+          "person.id": 28587302329901,
+          "person.firstName": "Shweta",
+          "person.lastName": "Khan",
+          "threadCount": 63,
+          "messageCount": 556
+        },
+        {
+          "person.id": 21990232563252,
+          "person.firstName": "Avraham",
+          "person.lastName": "Alhouthi",
+          "threadCount": 102,
+          "messageCount": 536
+        },
+        {
+          "person.id": 24189255812073,
+          "person.firstName": "Anh",
+          "person.lastName": "Pham",
+          "threadCount": 40,
+          "messageCount": 529
+        },
+        {
+          "person.id": 2199023258646,
+          "person.firstName": "Abdul Rahman",
+          "person.lastName": "Budjana",
+          "threadCount": 76,
+          "messageCount": 507
+        },
+        {
+          "person.id": 8796093023472,
+          "person.firstName": "K.",
+          "person.lastName": "Bose",
+          "threadCount": 81,
+          "messageCount": 496
+        },
+        {
+          "person.id": 24189255812627,
+          "person.firstName": "Edward",
+          "person.lastName": "Ouma",
+          "threadCount": 43,
+          "messageCount": 480
+        },
+        {
+          "person.id": 19791209308287,
+          "person.firstName": "Sam",
+          "person.lastName": "Huang",
+          "threadCount": 33,
+          "messageCount": 473
+        },
+        {
+          "person.id": 26388279066798,
+          "person.firstName": "Helen",
+          "person.lastName": "Carr",
+          "threadCount": 63,
+          "messageCount": 472
+        },
+        {
+          "person.id": 10995116283619,
+          "person.firstName": "Maria",
+          "person.lastName": "Kibona",
+          "threadCount": 99,
+          "messageCount": 464
+        },
+        {
+          "person.id": 24189255814904,
+          "person.firstName": "Abdulwahab",
+          "person.lastName": "Gillett",
+          "threadCount": 57,
+          "messageCount": 463
+        },
+        {
+          "person.id": 15393162789959,
+          "person.firstName": "Alfred",
+          "person.lastName": "Hoffmann",
+          "threadCount": 82,
+          "messageCount": 455
+        },
+        {
+          "person.id": 15393162795695,
+          "person.firstName": "Robert",
+          "person.lastName": "Bratianu",
+          "threadCount": 33,
+          "messageCount": 450
+        },
+        {
+          "person.id": 28587302326092,
+          "person.firstName": "John",
+          "person.lastName": "Sen",
+          "threadCount": 49,
+          "messageCount": 447
+        },
+        {
+          "person.id": 2199023263408,
+          "person.firstName": "Piotr",
+          "person.lastName": "Dobrowolski",
+          "threadCount": 60,
+          "messageCount": 442
+        },
+        {
+          "person.id": 15393162791403,
+          "person.firstName": "Aaron",
+          "person.lastName": "Cruz",
+          "threadCount": 73,
+          "messageCount": 442
+        },
+        {
+          "person.id": 26388279073393,
+          "person.firstName": "Rajiv",
+          "person.lastName": "Singh",
+          "threadCount": 37,
+          "messageCount": 441
+        },
+        {
+          "person.id": 26388279074683,
+          "person.firstName": "Adrian",
+          "person.lastName": "Popescu",
+          "threadCount": 59,
+          "messageCount": 441
+        },
+        {
+          "person.id": 8796093032304,
+          "person.firstName": "Eli",
+          "person.lastName": "Chihab",
+          "threadCount": 64,
+          "messageCount": 435
+        },
+        {
+          "person.id": 32985348843490,
+          "person.firstName": "Yang",
+          "person.lastName": "Li",
+          "threadCount": 39,
+          "messageCount": 427
+        },
+        {
+          "person.id": 21990232563874,
+          "person.firstName": "Howard",
+          "person.lastName": "Ha",
+          "threadCount": 29,
+          "messageCount": 420
+        },
+        {
+          "person.id": 19791209308584,
+          "person.firstName": "Huu",
+          "person.lastName": "Ho",
+          "threadCount": 30,
+          "messageCount": 419
+        },
+        {
+          "person.id": 17592186054998,
+          "person.firstName": "Manuel",
+          "person.lastName": "Cosio",
+          "threadCount": 45,
+          "messageCount": 417
+        },
+        {
+          "person.id": 10995116283889,
+          "person.firstName": "Joe",
+          "person.lastName": "Wong",
+          "threadCount": 28,
+          "messageCount": 413
+        },
+        {
+          "person.id": 28587302327742,
+          "person.firstName": "Jun",
+          "person.lastName": "Li",
+          "threadCount": 33,
+          "messageCount": 407
+        },
+        {
+          "person.id": 24189255820411,
+          "person.firstName": "Jose",
+          "person.lastName": "Sotto",
+          "threadCount": 33,
+          "messageCount": 398
+        },
+        {
+          "person.id": 8796093023326,
+          "person.firstName": "Joseph",
+          "person.lastName": "Sharma",
+          "threadCount": 29,
+          "messageCount": 397
+        },
+        {
+          "person.id": 2199023260815,
+          "person.firstName": "Chen",
+          "person.lastName": "Li",
+          "threadCount": 36,
+          "messageCount": 395
+        },
+        {
+          "person.id": 17592186052709,
+          "person.firstName": "Babar",
+          "person.lastName": "Hussain",
+          "threadCount": 80,
+          "messageCount": 393
+        },
+        {
+          "person.id": 24189255811542,
+          "person.firstName": "Fatmir",
+          "person.lastName": "Mojsov",
+          "threadCount": 74,
+          "messageCount": 390
+        },
+        {
+          "person.id": 21990232561742,
+          "person.firstName": "Abhishek",
+          "person.lastName": "Roy",
+          "threadCount": 60,
+          "messageCount": 385
+        },
+        {
+          "person.id": 17592186049517,
+          "person.firstName": "Natalia Barbu",
+          "person.lastName": "Goma",
+          "threadCount": 118,
+          "messageCount": 377
+        },
+        {
+          "person.id": 17592186052516,
+          "person.firstName": "Yang",
+          "person.lastName": "Yang",
+          "threadCount": 26,
+          "messageCount": 373
+        },
+        {
+          "person.id": 21990232557614,
+          "person.firstName": "Hoang Yen",
+          "person.lastName": "Nguyen",
+          "threadCount": 69,
+          "messageCount": 372
+        },
+        {
+          "person.id": 19791209309084,
+          "person.firstName": "Adriaan",
+          "person.lastName": "Dijk",
+          "threadCount": 50,
+          "messageCount": 369
+        },
+        {
+          "person.id": 28587302326226,
+          "person.firstName": "Mohamed",
+          "person.lastName": "Achiou",
+          "threadCount": 74,
+          "messageCount": 368
+        },
+        {
+          "person.id": 2199023256462,
+          "person.firstName": "Emperor of Brazil",
+          "person.lastName": "Dom Pedro II",
+          "threadCount": 70,
+          "messageCount": 365
+        },
+        {
+          "person.id": 35184372092691,
+          "person.firstName": "Carlos",
+          "person.lastName": "Escobar",
+          "threadCount": 42,
+          "messageCount": 363
+        },
+        {
+          "person.id": 15393162799448,
+          "person.firstName": "Fritz",
+          "person.lastName": "Muller",
+          "threadCount": 56,
+          "messageCount": 355
+        },
+        {
+          "person.id": 6597069770739,
+          "person.firstName": "Abdul Haris",
+          "person.lastName": "Gallagher",
+          "threadCount": 30,
+          "messageCount": 338
+        },
+        {
+          "person.id": 10995116281358,
+          "person.firstName": "Kunal",
+          "person.lastName": "Kumar",
+          "threadCount": 23,
+          "messageCount": 338
+        },
+        {
+          "person.id": 17592186050645,
+          "person.firstName": "Ning",
+          "person.lastName": "Zhang",
+          "threadCount": 80,
+          "messageCount": 337
+        },
+        {
+          "person.id": 17592186046498,
+          "person.firstName": "Andrea",
+          "person.lastName": "Blanco",
+          "threadCount": 144,
+          "messageCount": 336
+        },
+        {
+          "person.id": 19791209302061,
+          "person.firstName": "Manuel",
+          "person.lastName": "Martins",
+          "threadCount": 81,
+          "messageCount": 332
+        },
+        {
+          "person.id": 10995116279521,
+          "person.firstName": "Rahul",
+          "person.lastName": "Nair",
+          "threadCount": 54,
+          "messageCount": 328
+        },
+        {
+          "person.id": 19791209302125,
+          "person.firstName": "Alexander G.",
+          "person.lastName": "Arif",
+          "threadCount": 87,
+          "messageCount": 322
+        },
+        {
+          "person.id": 10995116285747,
+          "person.firstName": "Koji",
+          "person.lastName": "Tanaka",
+          "threadCount": 27,
+          "messageCount": 321
+        },
+        {
+          "person.id": 4398046512960,
+          "person.firstName": "Zhang",
+          "person.lastName": "Chen",
+          "threadCount": 116,
+          "messageCount": 318
+        },
+        {
+          "person.id": 28587302326788,
+          "person.firstName": "Carlos",
+          "person.lastName": "Rodriguez",
+          "threadCount": 66,
+          "messageCount": 318
+        },
+        {
+          "person.id": 32985348835600,
+          "person.firstName": "Isabel",
+          "person.lastName": "Diaz",
+          "threadCount": 48,
+          "messageCount": 314
+        },
+        {
+          "person.id": 6597069767028,
+          "person.firstName": "Grigore",
+          "person.lastName": "Bologan",
+          "threadCount": 68,
+          "messageCount": 310
+        },
+        {
+          "person.id": 17592186049899,
+          "person.firstName": "Ivan Ignatyevich",
+          "person.lastName": "Aleksandrov",
+          "threadCount": 44,
+          "messageCount": 307
+        },
+        {
+          "person.id": 26388279072682,
+          "person.firstName": "Abderrahmane",
+          "person.lastName": "Ferrer",
+          "threadCount": 96,
+          "messageCount": 305
+        },
+        {
+          "person.id": 15393162796126,
+          "person.firstName": "Agustiar",
+          "person.lastName": "Irama",
+          "threadCount": 28,
+          "messageCount": 304
+        },
+        {
+          "person.id": 26388279067483,
+          "person.firstName": "Aditya",
+          "person.lastName": "Khan",
+          "threadCount": 26,
+          "messageCount": 304
+        },
+        {
+          "person.id": 8796093023499,
+          "person.firstName": "Bruna",
+          "person.lastName": "Costa",
+          "threadCount": 94,
+          "messageCount": 302
+        },
+        {
+          "person.id": 17592186047024,
+          "person.firstName": "Wei",
+          "person.lastName": "Zhu",
+          "threadCount": 65,
+          "messageCount": 301
+        },
+        {
+          "person.id": 2783,
+          "person.firstName": "Rafael",
+          "person.lastName": "Alonso",
+          "threadCount": 71,
+          "messageCount": 299
+        },
+        {
+          "person.id": 2199023260487,
+          "person.firstName": "Bing",
+          "person.lastName": "Yang",
+          "threadCount": 52,
+          "messageCount": 298
+        },
+        {
+          "person.id": 4398046520667,
+          "person.firstName": "Charles",
+          "person.lastName": "Bona",
+          "threadCount": 52,
+          "messageCount": 298
+        },
+        {
+          "person.id": 26388279068136,
+          "person.firstName": "Koji",
+          "person.lastName": "Kato",
+          "threadCount": 20,
+          "messageCount": 291
+        },
+        {
+          "person.id": 19791209300230,
+          "person.firstName": "Benhalima",
+          "person.lastName": "Ferrer",
+          "threadCount": 44,
+          "messageCount": 290
+        },
+        {
+          "person.id": 15393162789362,
+          "person.firstName": "K.",
+          "person.lastName": "Kumar",
+          "threadCount": 24,
+          "messageCount": 287
+        },
+        {
+          "person.id": 19791209306276,
+          "person.firstName": "Emperor of Brazil",
+          "person.lastName": "Alves",
+          "threadCount": 62,
+          "messageCount": 287
+        },
+        {
+          "person.id": 24189255815184,
+          "person.firstName": "K.",
+          "person.lastName": "Kumar",
+          "threadCount": 31,
+          "messageCount": 283
+        },
+        {
+          "person.id": 17592186051871,
+          "person.firstName": "Ashok",
+          "person.lastName": "Sharma",
+          "threadCount": 56,
+          "messageCount": 282
+        },
+        {
+          "person.id": 17592186050809,
+          "person.firstName": "Pablo",
+          "person.lastName": "Cosio",
+          "threadCount": 29,
+          "messageCount": 280
+        },
+        {
+          "person.id": 17592186054199,
+          "person.firstName": "Fritz",
+          "person.lastName": "Fischer",
+          "threadCount": 63,
+          "messageCount": 279
+        },
+        {
+          "person.id": 19791209305198,
+          "person.firstName": "Martin",
+          "person.lastName": "Muller",
+          "threadCount": 39,
+          "messageCount": 277
+        },
+        {
+          "person.id": 19791209301504,
+          "person.firstName": "Jose",
+          "person.lastName": "Costa",
+          "threadCount": 18,
+          "messageCount": 271
+        },
+        {
+          "person.id": 2199023265231,
+          "person.firstName": "Wei",
+          "person.lastName": "Wang",
+          "threadCount": 84,
+          "messageCount": 270
+        },
+        {
+          "person.id": 8796093028247,
+          "person.firstName": "Jie",
+          "person.lastName": "Wang",
+          "threadCount": 19,
+          "messageCount": 268
+        },
+        {
+          "person.id": 15393162799092,
+          "person.firstName": "Ge",
+          "person.lastName": "Wang",
+          "threadCount": 31,
+          "messageCount": 267
+        },
+        {
+          "person.id": 10995116286217,
+          "person.firstName": "Carlos",
+          "person.lastName": "Mendez",
+          "threadCount": 19,
+          "messageCount": 264
+        }
+      ]
+    },
+    {
+      "query_nr": 10,
+      "variant": "10a",
+      "parameters": {
+        "personId": "6597069770479",
+        "country": "Italy",
+        "tagClass": "Thing",
+        "minPathDistance": "3",
+        "maxPathDistance": "4"
+      },
+      "results": [
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Ralph_Vaughan_Williams",
+          "messageCount": 3
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Aristophanes",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 15393162799165,
+          "tag.name": "Aristophanes",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Aristophanes",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 6079,
+          "tag.name": "Augustine_of_Hippo",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Bob_Hope",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Canada",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 15393162799165,
+          "tag.name": "Dmitry_Medvedev",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Franklin_D._Roosevelt",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 15393162793184,
+          "tag.name": "Interpol",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Jean-Baptiste_Lamarck",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023261968,
+          "tag.name": "Johannes_Brahms",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "John_Cage",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Leonard_Bernstein",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Ludwig_van_Beethoven",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 4398046512280,
+          "tag.name": "Muammar_Gaddafi",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Mughal_Empire",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Plácido_Domingo",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Slavoj_Žižek",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Wayne_Gretzky",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 2199023261968,
+          "tag.name": "Wolfgang_Amadeus_Mozart",
+          "messageCount": 2
+        },
+        {
+          "expertCandidatePerson.id": 9043,
+          "tag.name": "14th_Dalai_Lama",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "14th_Dalai_Lama",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046512280,
+          "tag.name": "14th_Dalai_Lama",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 217,
+          "tag.name": "99_Luftballons",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "A_Day_Without_Rain",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 28587302322352,
+          "tag.name": "A_Kind_of_Magic",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "A_Little_Bit_Me,_a_Little_Bit_You",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 7684,
+          "tag.name": "A_Whiter_Shade_of_Pale",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162793184,
+          "tag.name": "Aaron_Copland",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 17592186053088,
+          "tag.name": "Abbasid_Caliphate",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842018,
+          "tag.name": "Adolf_Hitler",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 217,
+          "tag.name": "Alan_Moore",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Albert_Einstein",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 217,
+          "tag.name": "Alexander_Downer",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209310154,
+          "tag.name": "Alexander_Pushkin",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046517288,
+          "tag.name": "Alfred,_Lord_Tennyson",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Alfred_Hitchcock",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 9043,
+          "tag.name": "Ali",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Ali",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046512280,
+          "tag.name": "Ali",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 21990232560354,
+          "tag.name": "Ali",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 21990232564061,
+          "tag.name": "All_the_Roadrunning",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842085,
+          "tag.name": "Ammon",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 6079,
+          "tag.name": "Andrew_Jackson",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Angola",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325581056,
+          "tag.name": "Another_One_Bites_the_Dust",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Anton_Chekhov",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046512280,
+          "tag.name": "Are_You_Experienced",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 21990232564061,
+          "tag.name": "Arenberg",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 217,
+          "tag.name": "Aristophanes",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Aristophanes",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Aristophanes",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 6079,
+          "tag.name": "Aristotle",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 10995116279128,
+          "tag.name": "Arnold_Schwarzenegger",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842085,
+          "tag.name": "Arthur_William_Baden_Powell",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Ashikaga_shogunate",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "At_Last",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 28587302322352,
+          "tag.name": "At_War_with_the_Mystics",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Augustin_Pyramus_de_Candolle",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 10995116285979,
+          "tag.name": "Augustine_of_Hippo",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842085,
+          "tag.name": "Augustine_of_Hippo",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 9043,
+          "tag.name": "Austrian_Empire",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209310154,
+          "tag.name": "Banned_in_the_U.S.A.",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Barbra_Streisand",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Barrio_Fino",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Barry_Manilow",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Before_You_Were_Punk",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Benjamin_Harrison",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Bertolt_Brecht",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Bill_Clinton",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Bill_Clinton",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842018,
+          "tag.name": "Blood_Sugar_Sex_Magik",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Bob_Dole",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Bob_Dylan",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842085,
+          "tag.name": "Botswana",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 10995116279128,
+          "tag.name": "Break_Like_the_Wind",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Breathe_Again",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 21990232564061,
+          "tag.name": "British_Ceylon",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023261968,
+          "tag.name": "British_Empire",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Burma",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "Busta_Rhymes",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Busta_Rhymes",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Béla_Bartók",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209309107,
+          "tag.name": "C._S._Lewis",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 21990232564061,
+          "tag.name": "Cameroon",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 35184372093958,
+          "tag.name": "Cannot_Buy_My_Soul",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Cape_Verde",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 19791209310154,
+          "tag.name": "Carl_Gustaf_Emil_Mannerheim",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046518779,
+          "tag.name": "Chaka_Khan",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023259874,
+          "tag.name": "Champa",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 7684,
+          "tag.name": "Charles_Dickens",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348842085,
+          "tag.name": "Charles_II_of_England",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325585300,
+          "tag.name": "Charles_I_of_England",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162793184,
+          "tag.name": "Charlton_Heston",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 4398046517288,
+          "tag.name": "Che_Guevara",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 30786325581417,
+          "tag.name": "Christopher_Columbus",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 2199023257601,
+          "tag.name": "Chrome_Dreams_II",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 10995116279128,
+          "tag.name": "Claude_Debussy",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 10995116285979,
+          "tag.name": "Claude_Debussy",
+          "messageCount": 1
+        }
+      ]
+    },
+    {
+      "query_nr": 10,
+      "variant": "10b",
+      "parameters": {
+        "personId": "926",
+        "country": "Slovenia",
+        "tagClass": "ComicsCharacter",
+        "minPathDistance": "3",
+        "maxPathDistance": "4"
+      },
+      "results": [
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Antonín_Dvořák",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Batman",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Bill_Clinton",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 32985348840920,
+          "tag.name": "Captain_America",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Confucius",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Diana_Ross",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Fernando_González",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Gautama_Buddha",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Gibraltar",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "James_Monroe",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Jan_Hus",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Kingdom_of_Aragon",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Lex_Luthor",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Luciano_Pavarotti",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Marcelo_Melo",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Michel_Foucault",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Neil_Gaiman",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Nicole_Kidman",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Richard_Nixon",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "Saint_Peter",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "Spider-Man",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 13194139537986,
+          "tag.name": "William_Pitt_the_Younger",
+          "messageCount": 1
+        },
+        {
+          "expertCandidatePerson.id": 15393162792327,
+          "tag.name": "You_Took_the_Words_Right_Out_of_My_Mouth",
+          "messageCount": 1
+        }
+      ]
+    },
+    {
+      "query_nr": 11,
+      "variant": "11",
+      "parameters": {
+        "country": "India",
+        "startDate": "2012-10-04",
+        "endDate": "2013-01-16"
+      },
+      "results": [
+        {
+          "count": 718
+        }
+      ]
+    },
+    {
+      "query_nr": 12,
+      "variant": "12",
+      "parameters": {
+        "startDate": "2012-06-05",
+        "lengthThreshold": "115",
+        "languages": "es;ta;pt"
+      },
+      "results": [
+        {
+          "messageCount": 0,
+          "personCount": 3850
+        },
+        {
+          "messageCount": 1,
+          "personCount": 641
+        },
+        {
+          "messageCount": 2,
+          "personCount": 576
+        },
+        {
+          "messageCount": 3,
+          "personCount": 445
+        },
+        {
+          "messageCount": 4,
+          "personCount": 442
+        },
+        {
+          "messageCount": 5,
+          "personCount": 356
+        },
+        {
+          "messageCount": 6,
+          "personCount": 324
+        },
+        {
+          "messageCount": 7,
+          "personCount": 271
+        },
+        {
+          "messageCount": 8,
+          "personCount": 255
+        },
+        {
+          "messageCount": 9,
+          "personCount": 230
+        },
+        {
+          "messageCount": 10,
+          "personCount": 196
+        },
+        {
+          "messageCount": 11,
+          "personCount": 184
+        },
+        {
+          "messageCount": 12,
+          "personCount": 176
+        },
+        {
+          "messageCount": 13,
+          "personCount": 170
+        },
+        {
+          "messageCount": 14,
+          "personCount": 139
+        },
+        {
+          "messageCount": 15,
+          "personCount": 133
+        },
+        {
+          "messageCount": 16,
+          "personCount": 123
+        },
+        {
+          "messageCount": 18,
+          "personCount": 101
+        },
+        {
+          "messageCount": 17,
+          "personCount": 98
+        },
+        {
+          "messageCount": 19,
+          "personCount": 97
+        },
+        {
+          "messageCount": 20,
+          "personCount": 85
+        },
+        {
+          "messageCount": 22,
+          "personCount": 83
+        },
+        {
+          "messageCount": 21,
+          "personCount": 79
+        },
+        {
+          "messageCount": 23,
+          "personCount": 69
+        },
+        {
+          "messageCount": 24,
+          "personCount": 64
+        },
+        {
+          "messageCount": 28,
+          "personCount": 59
+        },
+        {
+          "messageCount": 26,
+          "personCount": 54
+        },
+        {
+          "messageCount": 29,
+          "personCount": 47
+        },
+        {
+          "messageCount": 25,
+          "personCount": 46
+        },
+        {
+          "messageCount": 33,
+          "personCount": 45
+        },
+        {
+          "messageCount": 27,
+          "personCount": 43
+        },
+        {
+          "messageCount": 31,
+          "personCount": 42
+        },
+        {
+          "messageCount": 32,
+          "personCount": 41
+        },
+        {
+          "messageCount": 30,
+          "personCount": 37
+        },
+        {
+          "messageCount": 35,
+          "personCount": 31
+        },
+        {
+          "messageCount": 37,
+          "personCount": 29
+        },
+        {
+          "messageCount": 34,
+          "personCount": 28
+        },
+        {
+          "messageCount": 39,
+          "personCount": 24
+        },
+        {
+          "messageCount": 36,
+          "personCount": 24
+        },
+        {
+          "messageCount": 42,
+          "personCount": 21
+        },
+        {
+          "messageCount": 38,
+          "personCount": 21
+        },
+        {
+          "messageCount": 43,
+          "personCount": 19
+        },
+        {
+          "messageCount": 52,
+          "personCount": 18
+        },
+        {
+          "messageCount": 45,
+          "personCount": 18
+        },
+        {
+          "messageCount": 41,
+          "personCount": 18
+        },
+        {
+          "messageCount": 40,
+          "personCount": 16
+        },
+        {
+          "messageCount": 57,
+          "personCount": 15
+        },
+        {
+          "messageCount": 54,
+          "personCount": 14
+        },
+        {
+          "messageCount": 47,
+          "personCount": 14
+        },
+        {
+          "messageCount": 46,
+          "personCount": 14
+        },
+        {
+          "messageCount": 44,
+          "personCount": 14
+        },
+        {
+          "messageCount": 49,
+          "personCount": 13
+        },
+        {
+          "messageCount": 55,
+          "personCount": 12
+        },
+        {
+          "messageCount": 61,
+          "personCount": 11
+        },
+        {
+          "messageCount": 51,
+          "personCount": 11
+        },
+        {
+          "messageCount": 50,
+          "personCount": 11
+        },
+        {
+          "messageCount": 53,
+          "personCount": 10
+        },
+        {
+          "messageCount": 56,
+          "personCount": 9
+        },
+        {
+          "messageCount": 48,
+          "personCount": 9
+        },
+        {
+          "messageCount": 70,
+          "personCount": 8
+        },
+        {
+          "messageCount": 65,
+          "personCount": 8
+        },
+        {
+          "messageCount": 94,
+          "personCount": 7
+        },
+        {
+          "messageCount": 85,
+          "personCount": 7
+        },
+        {
+          "messageCount": 71,
+          "personCount": 7
+        },
+        {
+          "messageCount": 69,
+          "personCount": 7
+        },
+        {
+          "messageCount": 66,
+          "personCount": 7
+        },
+        {
+          "messageCount": 62,
+          "personCount": 7
+        },
+        {
+          "messageCount": 60,
+          "personCount": 7
+        },
+        {
+          "messageCount": 59,
+          "personCount": 7
+        },
+        {
+          "messageCount": 75,
+          "personCount": 6
+        },
+        {
+          "messageCount": 72,
+          "personCount": 6
+        },
+        {
+          "messageCount": 68,
+          "personCount": 6
+        },
+        {
+          "messageCount": 117,
+          "personCount": 5
+        },
+        {
+          "messageCount": 79,
+          "personCount": 5
+        },
+        {
+          "messageCount": 76,
+          "personCount": 5
+        },
+        {
+          "messageCount": 73,
+          "personCount": 5
+        },
+        {
+          "messageCount": 63,
+          "personCount": 5
+        },
+        {
+          "messageCount": 58,
+          "personCount": 5
+        },
+        {
+          "messageCount": 123,
+          "personCount": 4
+        },
+        {
+          "messageCount": 99,
+          "personCount": 4
+        },
+        {
+          "messageCount": 89,
+          "personCount": 4
+        },
+        {
+          "messageCount": 84,
+          "personCount": 4
+        },
+        {
+          "messageCount": 82,
+          "personCount": 4
+        },
+        {
+          "messageCount": 74,
+          "personCount": 4
+        },
+        {
+          "messageCount": 67,
+          "personCount": 4
+        },
+        {
+          "messageCount": 144,
+          "personCount": 3
+        },
+        {
+          "messageCount": 137,
+          "personCount": 3
+        },
+        {
+          "messageCount": 106,
+          "personCount": 3
+        },
+        {
+          "messageCount": 101,
+          "personCount": 3
+        },
+        {
+          "messageCount": 95,
+          "personCount": 3
+        },
+        {
+          "messageCount": 93,
+          "personCount": 3
+        },
+        {
+          "messageCount": 92,
+          "personCount": 3
+        },
+        {
+          "messageCount": 91,
+          "personCount": 3
+        },
+        {
+          "messageCount": 88,
+          "personCount": 3
+        },
+        {
+          "messageCount": 77,
+          "personCount": 3
+        },
+        {
+          "messageCount": 64,
+          "personCount": 3
+        },
+        {
+          "messageCount": 177,
+          "personCount": 2
+        },
+        {
+          "messageCount": 151,
+          "personCount": 2
+        },
+        {
+          "messageCount": 145,
+          "personCount": 2
+        },
+        {
+          "messageCount": 140,
+          "personCount": 2
+        },
+        {
+          "messageCount": 134,
+          "personCount": 2
+        },
+        {
+          "messageCount": 132,
+          "personCount": 2
+        },
+        {
+          "messageCount": 128,
+          "personCount": 2
+        },
+        {
+          "messageCount": 124,
+          "personCount": 2
+        },
+        {
+          "messageCount": 122,
+          "personCount": 2
+        },
+        {
+          "messageCount": 115,
+          "personCount": 2
+        },
+        {
+          "messageCount": 112,
+          "personCount": 2
+        },
+        {
+          "messageCount": 108,
+          "personCount": 2
+        },
+        {
+          "messageCount": 102,
+          "personCount": 2
+        },
+        {
+          "messageCount": 98,
+          "personCount": 2
+        },
+        {
+          "messageCount": 96,
+          "personCount": 2
+        },
+        {
+          "messageCount": 90,
+          "personCount": 2
+        },
+        {
+          "messageCount": 86,
+          "personCount": 2
+        },
+        {
+          "messageCount": 83,
+          "personCount": 2
+        },
+        {
+          "messageCount": 78,
+          "personCount": 2
+        },
+        {
+          "messageCount": 525,
+          "personCount": 1
+        },
+        {
+          "messageCount": 471,
+          "personCount": 1
+        },
+        {
+          "messageCount": 403,
+          "personCount": 1
+        },
+        {
+          "messageCount": 382,
+          "personCount": 1
+        },
+        {
+          "messageCount": 354,
+          "personCount": 1
+        },
+        {
+          "messageCount": 353,
+          "personCount": 1
+        },
+        {
+          "messageCount": 324,
+          "personCount": 1
+        },
+        {
+          "messageCount": 310,
+          "personCount": 1
+        },
+        {
+          "messageCount": 261,
+          "personCount": 1
+        },
+        {
+          "messageCount": 257,
+          "personCount": 1
+        },
+        {
+          "messageCount": 245,
+          "personCount": 1
+        },
+        {
+          "messageCount": 244,
+          "personCount": 1
+        },
+        {
+          "messageCount": 237,
+          "personCount": 1
+        },
+        {
+          "messageCount": 224,
+          "personCount": 1
+        },
+        {
+          "messageCount": 218,
+          "personCount": 1
+        },
+        {
+          "messageCount": 216,
+          "personCount": 1
+        },
+        {
+          "messageCount": 214,
+          "personCount": 1
+        },
+        {
+          "messageCount": 210,
+          "personCount": 1
+        },
+        {
+          "messageCount": 205,
+          "personCount": 1
+        },
+        {
+          "messageCount": 203,
+          "personCount": 1
+        },
+        {
+          "messageCount": 198,
+          "personCount": 1
+        },
+        {
+          "messageCount": 197,
+          "personCount": 1
+        },
+        {
+          "messageCount": 173,
+          "personCount": 1
+        },
+        {
+          "messageCount": 172,
+          "personCount": 1
+        },
+        {
+          "messageCount": 170,
+          "personCount": 1
+        },
+        {
+          "messageCount": 165,
+          "personCount": 1
+        },
+        {
+          "messageCount": 164,
+          "personCount": 1
+        },
+        {
+          "messageCount": 161,
+          "personCount": 1
+        },
+        {
+          "messageCount": 160,
+          "personCount": 1
+        },
+        {
+          "messageCount": 153,
+          "personCount": 1
+        },
+        {
+          "messageCount": 152,
+          "personCount": 1
+        },
+        {
+          "messageCount": 149,
+          "personCount": 1
+        },
+        {
+          "messageCount": 148,
+          "personCount": 1
+        },
+        {
+          "messageCount": 147,
+          "personCount": 1
+        },
+        {
+          "messageCount": 138,
+          "personCount": 1
+        },
+        {
+          "messageCount": 133,
+          "personCount": 1
+        },
+        {
+          "messageCount": 131,
+          "personCount": 1
+        },
+        {
+          "messageCount": 130,
+          "personCount": 1
+        },
+        {
+          "messageCount": 129,
+          "personCount": 1
+        },
+        {
+          "messageCount": 126,
+          "personCount": 1
+        },
+        {
+          "messageCount": 125,
+          "personCount": 1
+        },
+        {
+          "messageCount": 120,
+          "personCount": 1
+        },
+        {
+          "messageCount": 119,
+          "personCount": 1
+        },
+        {
+          "messageCount": 118,
+          "personCount": 1
+        },
+        {
+          "messageCount": 116,
+          "personCount": 1
+        },
+        {
+          "messageCount": 111,
+          "personCount": 1
+        },
+        {
+          "messageCount": 110,
+          "personCount": 1
+        },
+        {
+          "messageCount": 109,
+          "personCount": 1
+        },
+        {
+          "messageCount": 103,
+          "personCount": 1
+        },
+        {
+          "messageCount": 97,
+          "personCount": 1
+        },
+        {
+          "messageCount": 81,
+          "personCount": 1
+        }
+      ]
+    },
+    {
+      "query_nr": 13,
+      "variant": "13",
+      "parameters": {
+        "country": "India",
+        "endDate": "2012-11-09"
+      },
+      "results": [
+        {
+          "zombie.id": 4398046515583,
+          "zombieLikeCount": 1,
+          "totalLikeCount": 28,
+          "zombieScore": 0.03571428571428571
+        },
+        {
+          "zombie.id": 15393162797343,
+          "zombieLikeCount": 1,
+          "totalLikeCount": 32,
+          "zombieScore": 0.03125
+        },
+        {
+          "zombie.id": 6597069766996,
+          "zombieLikeCount": 1,
+          "totalLikeCount": 59,
+          "zombieScore": 0.01694915254237288
+        },
+        {
+          "zombie.id": 28587302331214,
+          "zombieLikeCount": 1,
+          "totalLikeCount": 70,
+          "zombieScore": 0.014285714285714285
+        },
+        {
+          "zombie.id": 13194139540014,
+          "zombieLikeCount": 4,
+          "totalLikeCount": 349,
+          "zombieScore": 0.011461318051575931
+        },
+        {
+          "zombie.id": 6597069773020,
+          "zombieLikeCount": 1,
+          "totalLikeCount": 209,
+          "zombieScore": 0.004784688995215311
+        },
+        {
+          "zombie.id": 1032,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2238,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 3302,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6353,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 9542,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 10,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023255606,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023257681,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 2,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023259422,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023260507,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023260849,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023261845,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 30,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023263793,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 2199023264195,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 4398046511273,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 4398046521177,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6597069768899,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6597069770651,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6597069771254,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6597069771658,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 6597069775228,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093023336,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093029248,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 2,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093029298,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093029959,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093031385,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 8796093032614,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 10995116278425,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 10995116279003,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 2,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 10995116279401,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 10995116284530,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 10995116284647,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 13194139534872,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 13194139537381,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 13194139541490,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 13194139542083,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 21,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162789626,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162790005,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162790303,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162791561,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162795607,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162796167,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162797457,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162797711,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 15393162798239,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 17592186045794,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 17592186050665,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 17592186051978,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 79,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 19791209302580,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 19791209310126,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 19791209310408,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 21990232558127,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 21990232560358,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 21990232561810,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 21990232563609,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255811996,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255812829,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255812892,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255813751,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255819454,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 24189255820910,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 26388279066976,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 26388279074008,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 26388279075800,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 28587302322826,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 28587302323140,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 28587302323831,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 28587302332315,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 28587302332388,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 30786325580674,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 30786325582071,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 32985348836171,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 32985348840421,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372090806,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372091151,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372093248,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372095848,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372096349,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372097346,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372097978,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 1,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372098113,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372098845,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        },
+        {
+          "zombie.id": 35184372098880,
+          "zombieLikeCount": 0,
+          "totalLikeCount": 0,
+          "zombieScore": 0.0
+        }
+      ]
+    },
+    {
+      "query_nr": 14,
+      "variant": "14a",
+      "parameters": {
+        "country1": "Philippines",
+        "country2": "Taiwan"
+      },
+      "results": [
+        {
+          "person1.id": 2199023266161,
+          "person2.id": 2199023259897,
+          "city1.name": "Cavite_City",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046514165,
+          "person2.id": 30786325580485,
+          "city1.name": "Makati",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046516434,
+          "person2.id": 2199023259897,
+          "city1.name": "Ermita",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046516776,
+          "person2.id": 24189255821690,
+          "city1.name": "Sampaloc",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046517769,
+          "person2.id": 30786325580485,
+          "city1.name": "Mandaluyong",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046521222,
+          "person2.id": 2199023259897,
+          "city1.name": "Malate",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046521507,
+          "person2.id": 19791209308287,
+          "city1.name": "Naga",
+          "score": 16
+        },
+        {
+          "person1.id": 6597069768162,
+          "person2.id": 8001,
+          "city1.name": "Kalibo",
+          "score": 16
+        },
+        {
+          "person1.id": 6597069775480,
+          "person2.id": 6597069769061,
+          "city1.name": "Pasay",
+          "score": 16
+        },
+        {
+          "person1.id": 6597069775831,
+          "person2.id": 2199023259897,
+          "city1.name": "Santa_Rosa",
+          "score": 16
+        },
+        {
+          "person1.id": 8796093022752,
+          "person2.id": 8001,
+          "city1.name": "Intramuros",
+          "score": 16
+        },
+        {
+          "person1.id": 8796093030118,
+          "person2.id": 19791209308287,
+          "city1.name": "San_Miguel",
+          "score": 16
+        },
+        {
+          "person1.id": 10995116284563,
+          "person2.id": 4398046513747,
+          "city1.name": "Davao_City",
+          "score": 16
+        },
+        {
+          "person1.id": 15393162793426,
+          "person2.id": 4398046513747,
+          "city1.name": "Angeles",
+          "score": 16
+        },
+        {
+          "person1.id": 17592186046583,
+          "person2.id": 10995116279524,
+          "city1.name": "Iligan",
+          "score": 16
+        },
+        {
+          "person1.id": 17592186047071,
+          "person2.id": 19791209308287,
+          "city1.name": "Malolos",
+          "score": 16
+        },
+        {
+          "person1.id": 17592186053366,
+          "person2.id": 17592186050725,
+          "city1.name": "Los_Baños",
+          "score": 16
+        },
+        {
+          "person1.id": 17592186053760,
+          "person2.id": 2199023258965,
+          "city1.name": "Zamboanga_City",
+          "score": 16
+        },
+        {
+          "person1.id": 19791209300166,
+          "person2.id": 13194139534446,
+          "city1.name": "Cabanatuan",
+          "score": 16
+        },
+        {
+          "person1.id": 19791209304999,
+          "person2.id": 13194139534446,
+          "city1.name": "Laoag",
+          "score": 16
+        },
+        {
+          "person1.id": 19791209309287,
+          "person2.id": 6456,
+          "city1.name": "Biñan",
+          "score": 16
+        },
+        {
+          "person1.id": 28587302324919,
+          "person2.id": 2199023259897,
+          "city1.name": "Manila",
+          "score": 16
+        },
+        {
+          "person1.id": 30786325587555,
+          "person2.id": 17592186044852,
+          "city1.name": "Bacolod",
+          "score": 16
+        },
+        {
+          "person1.id": 4398046521694,
+          "person2.id": 13194139534446,
+          "city1.name": "Lipa",
+          "score": 15
+        },
+        {
+          "person1.id": 8796093031783,
+          "person2.id": 10995116280964,
+          "city1.name": "Tagbilaran",
+          "score": 15
+        },
+        {
+          "person1.id": 21990232557022,
+          "person2.id": 6456,
+          "city1.name": "Legazpi",
+          "score": 15
+        },
+        {
+          "person1.id": 21990232561626,
+          "person2.id": 6597069769061,
+          "city1.name": "Quezon_City",
+          "score": 15
+        }
+      ]
+    },
+    {
+      "query_nr": 14,
+      "variant": "14b",
+      "parameters": {
+        "country1": "Azerbaijan",
+        "country2": "South_Korea"
+      },
+      "results": [
+        {
+          "person1.id": 24189255811081,
+          "person2.id": 13194139533514,
+          "city1.name": "Baku",
+          "score": 5
+        }
+      ]
+    },
+    {
+      "query_nr": 15,
+      "variant": "15a",
+      "parameters": {
+        "person1Id": "8796093031630",
+        "person2Id": "17592186049041",
+        "startDate": "2012-11-04",
+        "endDate": "2012-11-08"
+      },
+      "results": [
+        {
+          "weight": 4.0
+        }
+      ]
+    },
+    {
+      "query_nr": 15,
+      "variant": "15b",
+      "parameters": {
+        "person1Id": "30786325585720",
+        "person2Id": "13194139538394",
+        "startDate": "2010-04-20",
+        "endDate": "2010-05-12"
+      },
+      "results": [
+        {
+          "weight": 1.4172008547008548
+        }
+      ]
+    },
+    {
+      "query_nr": 16,
+      "variant": "16a",
+      "parameters": {
+        "tagA": "Alexander_Downer",
+        "dateA": "2012-01-30",
+        "tagB": "Henry_II_of_England",
+        "dateB": "2012-09-21",
+        "maxKnowsLimit": "6"
+      },
+      "results": [
+        {
+          "person.id": 24189255819001,
+          "messageCountA": 2,
+          "messageCountB": 1
+        }
+      ]
+    },
+    {
+      "query_nr": 16,
+      "variant": "16b",
+      "parameters": {
+        "tagA": "Jeff_Kennett",
+        "dateA": "2012-12-24",
+        "tagB": "Ralph_Bakshi",
+        "dateB": "2010-05-12",
+        "maxKnowsLimit": "6"
+      },
+      "results": []
+    },
+    {
+      "query_nr": 17,
+      "variant": "17",
+      "parameters": {
+        "tag": "Kissin_U",
+        "delta": "12"
+      },
+      "results": [
+        {
+          "person1.id": 15393162791639,
+          "messageCount": 1
+        }
+      ]
+    },
+    {
+      "query_nr": 18,
+      "variant": "18",
+      "parameters": {
+        "tag": "Fyodor_Dostoyevsky"
+      },
+      "results": [
+        {
+          "person1.id": 2199023256539,
+          "person2.id": 24189255821523,
+          "mutualFriendCount": 31
+        },
+        {
+          "person1.id": 24189255821523,
+          "person2.id": 2199023256539,
+          "mutualFriendCount": 31
+        },
+        {
+          "person1.id": 15393162796970,
+          "person2.id": 24189255820514,
+          "mutualFriendCount": 25
+        },
+        {
+          "person1.id": 24189255820514,
+          "person2.id": 15393162796970,
+          "mutualFriendCount": 25
+        },
+        {
+          "person1.id": 4398046511410,
+          "person2.id": 13194139543082,
+          "mutualFriendCount": 23
+        },
+        {
+          "person1.id": 10995116284091,
+          "person2.id": 24189255815677,
+          "mutualFriendCount": 23
+        },
+        {
+          "person1.id": 13194139543082,
+          "person2.id": 4398046511410,
+          "mutualFriendCount": 23
+        },
+        {
+          "person1.id": 24189255815677,
+          "person2.id": 10995116284091,
+          "mutualFriendCount": 23
+        },
+        {
+          "person1.id": 24189255819695,
+          "person2.id": 24189255821523,
+          "mutualFriendCount": 20
+        },
+        {
+          "person1.id": 24189255821523,
+          "person2.id": 24189255819695,
+          "mutualFriendCount": 20
+        },
+        {
+          "person1.id": 24189255820514,
+          "person2.id": 24189255821523,
+          "mutualFriendCount": 18
+        },
+        {
+          "person1.id": 24189255821523,
+          "person2.id": 24189255820514,
+          "mutualFriendCount": 18
+        },
+        {
+          "person1.id": 2199023256539,
+          "person2.id": 15393162796970,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 2199023256539,
+          "person2.id": 24189255819695,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 13194139536963,
+          "person2.id": 13194139543082,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 13194139543082,
+          "person2.id": 13194139536963,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 15393162796970,
+          "person2.id": 2199023256539,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 17592186050431,
+          "person2.id": 26388279069225,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 24189255819695,
+          "person2.id": 2199023256539,
+          "mutualFriendCount": 17
+        },
+        {
+          "person1.id": 26388279069225,
+          "person2.id": 17592186050431,
+          "mutualFriendCount": 17
+        }
+      ]
+    },
+    {
+      "query_nr": 19,
+      "variant": "19a",
+      "parameters": {
+        "city1Id": "655",
+        "city2Id": "1138"
+      },
+      "results": [
+        {
+          "person1.id": 24189255818627,
+          "person2.id": 26388279072272,
+          "totalWeight": 39.0
+        }
+      ]
+    },
+    {
+      "query_nr": 19,
+      "variant": "19b",
+      "parameters": {
+        "city1Id": "129",
+        "city2Id": "265"
+      },
+      "results": [
+        {
+          "person1.id": 8796093024188,
+          "person2.id": 17592186053132,
+          "totalWeight": 37.0
+        }
+      ]
+    },
+    {
+      "query_nr": 20,
+      "variant": "20a",
+      "parameters": {
+        "company": "Balkh_Airlines",
+        "person2Id": "10995116285979"
+      },
+      "results": []
+    },
+    {
+      "query_nr": 20,
+      "variant": "20b",
+      "parameters": {
+        "company": "National_Airlines_(5M)",
+        "person2Id": "13194139540317"
+      },
+      "results": [
+        {
+          "person1.id": 24189255819104,
+          "totalWeight": 3
+        }
+      ]
+    }
+  ]
+}

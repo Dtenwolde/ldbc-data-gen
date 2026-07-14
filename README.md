@@ -187,6 +187,21 @@ The expected BI reference root for parity scripts is:
 reference_data/sf0.003/graphs/parquet/bi/composite-merged-fk/initial_snapshot
 ```
 
+The SF1 CI gate also verifies the results of all 20 BI queries (28 parameter
+variants) against a canonical PostgreSQL result fixture:
+
+```sh
+python3 tools/generated_checksums.py \
+  --sf 1 \
+  --threads 1 \
+  --expected test/fixtures/ldbc_snb_bi_sf1_checksums.csv \
+  --expected-bi-results test/fixtures/ldbc_snb_bi_sf1_results.json
+```
+
+The fixture was produced independently with PostgreSQL over the official
+Spark SF1 `composite-merged-fk` dataset. See [the parity notes](docs/parity.md#sf1-bi-query-result-oracle)
+for provenance, coverage, and regeneration instructions.
+
 ## Building And Testing
 
 Initialize submodules:

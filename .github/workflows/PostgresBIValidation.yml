@@ -1,0 +1,102 @@
+name: PostgreSQL BI Validation
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-bi-validation:
+    name: Regenerate SF1 query results with PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16.14-bookworm
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Check out extension
+        uses: actions/checkout@v4
+
+      - name: Check out pinned LDBC BI queries
+        uses: actions/checkout@v4
+        with:
+          repository: ldbc/ldbc_snb_bi
+          ref: 47dd38b40844ecdb0e42e5a610c369535304786d
+          path: .cache/ldbc_snb_bi
+
+      - name: Install PostgreSQL client and zstd
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client zstd
+
+      - name: Cache official Spark SF1 archive
+        uses: actions/cache@v4
+        with:
+          path: .cache/bi-validation/downloads
+          key: ldbc-bi-spark-sf1-a72938e244e6aa9d
+
+      - name: Download and verify official Spark SF1 data
+        run: |
+          mkdir -p .cache/bi-validation/downloads
+          archive=.cache/bi-validation/downloads/bi-sf1-composite-merged-fk.tar.zst
+          if [ ! -f "$archive" ]; then
+            curl --fail --location --retry 3 \
+              --output "$archive" \
+              https://datasets.ldbcouncil.org/snb-bi/bi-sf1-composite-merged-fk.tar.zst
+          fi
+          echo "a72938e244e6aa9d99632fcd5065e50c669ecf4d00f60bd162b266df4a7aba13  $archive" \
+            | sha256sum --check
+
+      - name: Extract the initial snapshot
+        run: |
+          mkdir -p .cache/bi-validation/data
+          tar --use-compress-program=unzstd \
+            --extract \
+            --file .cache/bi-validation/downloads/bi-sf1-composite-merged-fk.tar.zst \
+            --directory .cache/bi-validation/data \
+            bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot
+
+      - name: Load official Spark data into PostgreSQL
+        env:
+          PGPASSWORD: postgres
+        run: |
+          python3 tools/postgres_bi_loader.py \
+            --dsn postgresql://postgres@localhost:5432/postgres \
+            --schema ldbc_bi_sf1 \
+            --snapshot .cache/bi-validation/data/bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot \
+            --format csv
+
+      - name: Regenerate and compare all BI query results
+        env:
+          PGPASSWORD: postgres
+        run: |
+          python3 tools/bi_query_results.py postgres \
+            --dsn postgresql://postgres@localhost:5432/postgres \
+            --schema ldbc_bi_sf1 \
+            --queries .cache/ldbc_snb_bi/umbra/queries \
+            --fixture test/fixtures/ldbc_snb_bi_sf1_results.json \
+            --output postgres-sf1-results.json
+          python3 tools/bi_query_results.py compare \
+            --expected test/fixtures/ldbc_snb_bi_sf1_results.json \
+            --actual postgres-sf1-results.json
+
+      - name: Upload regenerated PostgreSQL results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postgres-sf1-results
+          path: postgres-sf1-results.json
+          if-no-files-found: ignore
+

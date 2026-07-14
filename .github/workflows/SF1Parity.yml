@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   sf1-parity:
-    name: Verify all SF1 relation checksums
+    name: Verify SF1 relations and BI queries
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -40,4 +40,5 @@ jobs:
           python3 tools/generated_checksums.py \
             --sf 1 \
             --threads 1 \
-            --expected test/fixtures/ldbc_snb_bi_sf1_checksums.csv
+            --expected test/fixtures/ldbc_snb_bi_sf1_checksums.csv \
+            --expected-bi-results test/fixtures/ldbc_snb_bi_sf1_results.json

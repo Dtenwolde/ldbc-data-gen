@@ -11,6 +11,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from bi_query_results import assert_fixtures_match, build_duckdb_fixture, load_fixture
+
 
 NULL_MARKER = "<LDBC_NULL>"
 FIELD_SEP = "\\x1f"
@@ -92,6 +94,11 @@ def main(argv: list[str]) -> int:
         type=Path,
         help="CSV manifest of expected relation,rows,checksum values; exits non-zero on mismatch",
     )
+    parser.add_argument(
+        "--expected-bi-results",
+        type=Path,
+        help="JSON fixture of expected BI query results; executes all fixture cases on the generated data",
+    )
     args = parser.parse_args(argv)
 
     if not args.duckdb.exists():
@@ -117,6 +124,22 @@ def main(argv: list[str]) -> int:
             row_count, checksum = relation_summary(args.duckdb, database, relation, source)
             actual[relation["name"]] = (row_count, checksum)
             writer.writerow([relation["name"], row_count, checksum])
+
+        if args.expected_bi_results:
+            expected_bi_results = load_fixture(args.expected_bi_results)
+            actual_bi_results = build_duckdb_fixture(
+                args.duckdb,
+                args.extension,
+                database,
+                args.schema,
+                expected_bi_results["cases"],
+            )
+            assert_fixtures_match(expected_bi_results, actual_bi_results)
+            print(
+                f"verified {len(actual_bi_results['cases'])} BI query cases against "
+                f"{args.expected_bi_results}",
+                file=sys.stderr,
+            )
 
     if args.expected:
         with args.expected.open(newline="", encoding="utf-8") as expected_file:
