@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD "17" CACHE STRING "C++ standard to enforce")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(src/include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/generated)
 include_directories(duckdb/extension/icu/third_party/icu/common)
 include_directories(duckdb/extension/icu/third_party/icu/i18n)
 include_directories(duckdb/extension/parquet/include)
@@ -21,8 +22,21 @@ include_directories(duckdb/third_party/snappy)
 include_directories(duckdb/third_party/lz4)
 include_directories(duckdb/third_party/brotli/include)
 
+set(LDBC_BI_QUERY_DEFINITIONS "")
+foreach(QUERY_NUMBER RANGE 1 20)
+  set(QUERY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/queries/bi-${QUERY_NUMBER}.sql")
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${QUERY_PATH}")
+  file(READ "${QUERY_PATH}" QUERY_TEXT)
+  string(APPEND LDBC_BI_QUERY_DEFINITIONS
+         "    R\"LDBCBI(${QUERY_TEXT})LDBCBI\",\n")
+endforeach()
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(src/include/ldbc_bi_queries_generated.hpp.in
+               "${CMAKE_CURRENT_BINARY_DIR}/generated/ldbc_bi_queries_generated.hpp" @ONLY)
+
 set(EXTENSION_SOURCES
     src/ldbc_data_gen_extension.cpp
+    src/ldbc_bi_queries.cpp
     src/ldbc_java_random.cpp
     src/ldbc_datagen_config.cpp
     src/ldbc_unicode.cpp

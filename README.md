@@ -67,6 +67,38 @@ ORDER BY relation_name, operation, column_index;
 
 This returns one row per BI column, including `relation_name`, `entity_path`, `kind`, `operation`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`. `operation` is one of `initial_snapshot`, `inserts`, or `deletes`.
 
+## BI Queries
+
+The extension includes all 20 LDBC SNB BI queries. They can be run with a
+TPC-H-style pragma against any schema produced by `ldbcgen`:
+
+```sql
+PRAGMA ldbc_bi(
+    1,
+    schema = 'main',
+    datetime = TIMESTAMP '2011-12-01 00:00:00'
+);
+```
+
+The optional `catalog` and `schema` arguments default to the current catalog
+and schema. Named query parameters use snake case. The catalog lists each
+query, its required parameters, and the underlying SQL:
+
+```sql
+SELECT query_nr, name, parameters
+FROM ldbc_bi_queries()
+ORDER BY query_nr;
+```
+
+The pragma derives the reference implementation's merged `Message`, message
+tag/like, place subtype, organisation subtype, and query precomputation
+relations as inline CTEs. No preparation step or additional persistent tables
+are required.
+
+The query SQL is adapted from the official
+[LDBC SNB BI reference implementation](https://github.com/ldbc/ldbc_snb_bi/tree/main/umbra/queries)
+under the Apache License 2.0.
+
 ## Reference Scope
 
 The Spark BI writer stores output under:

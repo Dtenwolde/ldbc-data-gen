@@ -1,6 +1,7 @@
 #define DUCKDB_EXTENSION_MAIN
 
 #include "ldbc_data_gen_extension.hpp"
+#include "ldbc_bi_queries.hpp"
 #include "ldbc_datagen_config.hpp"
 #include "ldbc_gen.hpp"
 #include "ldbc_java_random.hpp"
@@ -5178,6 +5179,8 @@ static void LdbcEmailBaseFunction(DataChunk &args, ExpressionState &state, Vecto
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
+	RegisterLdbcBiQueries(loader);
+
 	TableFunction ldbcgen("ldbcgen", {}, LdbcGenFunction, LdbcGenBind, LdbcGenInit);
 	ldbcgen.named_parameters["sf"] = LogicalType::DOUBLE;
 	ldbcgen.named_parameters["catalog"] = LogicalType::VARCHAR;

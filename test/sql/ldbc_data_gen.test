@@ -248,6 +248,54 @@ Post	3189
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');
 
+# The extension exposes the complete official LDBC BI query catalog.
+query III
+SELECT COUNT(*), MIN(query_nr), MAX(query_nr)
+FROM ldbc_bi_queries();
+----
+20	1	20
+
+# Query pragmas run directly against generated base relations. The compatibility
+# CTEs derive merged Message and the other reference-only relations inline.
+statement ok
+PRAGMA ldbc_bi(1, schema = 'ldbc_test', datetime = TIMESTAMP '2012-01-01');
+
+statement ok
+PRAGMA ldbc_bi(
+  12,
+  schema = 'ldbc_test',
+  start_date = TIMESTAMP '2010-07-22',
+  length_threshold = 20,
+  languages = ['ar', 'hu']
+);
+
+# Exercise the DuckDB adaptations of the recursive path queries.
+statement ok
+PRAGMA ldbc_bi(
+  15,
+  schema = 'ldbc_test',
+  person1_id = 21990232564808,
+  person2_id = 26388279076936,
+  start_date = TIMESTAMP '2010-11-01',
+  end_date = TIMESTAMP '2010-12-01'
+);
+
+statement ok
+PRAGMA ldbc_bi(19, schema = 'ldbc_test', city1_id = 608, city2_id = 1148);
+
+statement ok
+PRAGMA ldbc_bi(20, schema = 'ldbc_test', person2_id = 32985348834889, company = 'Express_Air');
+
+statement error
+PRAGMA ldbc_bi(0, schema = 'ldbc_test');
+----
+Invalid Input Error: LDBC BI query number must be between 1 and 20
+
+statement error
+PRAGMA ldbc_bi(1, schema = 'ldbc_test');
+----
+Invalid Input Error: LDBC BI query 1 requires parameter 'datetime'
+
 query I
 SELECT COUNT(*)
 FROM duckdb_tables()
