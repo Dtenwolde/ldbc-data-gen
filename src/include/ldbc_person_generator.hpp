@@ -302,12 +302,15 @@ class LdbcForumGenerator {
 public:
 	using BlockCallback =
 	    std::function<void(idx_t block_id, idx_t block_start, idx_t block_end, vector<LdbcForum> &forums)>;
+	using SliceCallback = std::function<void(idx_t slice_id, idx_t slice_start, idx_t slice_end,
+	                                         vector<LdbcForum> &forums, bool finished)>;
 
 	LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
 	                   const vector<LdbcKnowsEdge> &knows_edges,
 	                   const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
 	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr, idx_t threads = 1,
-	                   ClientContext *context = nullptr, const BlockCallback &block_callback = nullptr);
+	                   ClientContext *context = nullptr, const BlockCallback &block_callback = nullptr,
+	                   const SliceCallback &slice_callback = nullptr);
 	~LdbcForumGenerator();
 
 	bool GenerateNext(idx_t max_persons = 1);

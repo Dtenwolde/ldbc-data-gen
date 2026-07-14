@@ -2349,9 +2349,7 @@ private:
 		return {LogicalType::DATE, LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT};
 	}
 
-	void MaterializeForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBatch &target) const {
-		ForumChunkBuilders builders(UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context
-		                                                                                              : nullptr);
+	void AppendForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBuilders &builders) const {
 		for (idx_t forum_idx = start; forum_idx < end; forum_idx++) {
 			auto &forum = forums[forum_idx];
 			if (IsSnapshotRow(forum.creation_date)) {
@@ -2458,6 +2456,12 @@ private:
 				}
 			}
 		}
+	}
+
+	void MaterializeForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBatch &target) const {
+		ForumChunkBuilders builders(UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context
+		                                                                                              : nullptr);
+		AppendForumRange(forums, start, end, builders);
 		target = builders.Finish();
 	}
 
@@ -2529,6 +2533,67 @@ private:
 		if (UseDirectForumParquet()) {
 			WriteForumSnapshotParquetBlock(block_id, batch);
 		}
+		QueueMaterializedForumBatch(block_id, std::move(batch), materialize_delta);
+	}
+
+	void MaterializeForumSlice(idx_t slice_id, idx_t slice_start, idx_t slice_end, vector<LdbcForum> &forums,
+	                           bool finished) {
+		(void)slice_start;
+		(void)slice_end;
+		ForumChunkBuilders *builders;
+		{
+			std::lock_guard<std::mutex> lock(active_forum_chunk_builders_lock);
+			auto entry = active_forum_chunk_builders.find(slice_id);
+			if (entry == active_forum_chunk_builders.end()) {
+				auto snapshot_context =
+				    UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context : nullptr;
+				auto result = active_forum_chunk_builders.emplace(
+				    slice_id, make_uniq<ForumChunkBuilders>(snapshot_context));
+				entry = result.first;
+			}
+			builders = entry->second.get();
+		}
+		auto materialize_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
+		AppendForumRange(forums, 0, forums.size(), *builders);
+		forums.clear();
+		auto materialize_delta = LdbcPhaseProfileEnabled()
+		                             ? LdbcProfileSampleDelta(LdbcProfileSampleNow(), materialize_start)
+		                             : LdbcProfileSample();
+		if (!finished) {
+			RecordForumMaterializeProfile(materialize_delta);
+			return;
+		}
+		unique_ptr<ForumChunkBuilders> completed_builders;
+		{
+			std::lock_guard<std::mutex> lock(active_forum_chunk_builders_lock);
+			auto entry = active_forum_chunk_builders.find(slice_id);
+			if (entry == active_forum_chunk_builders.end()) {
+				throw InternalException("Missing forum slice builders for slice %llu",
+				                        static_cast<unsigned long long>(slice_id));
+			}
+			completed_builders = std::move(entry->second);
+			active_forum_chunk_builders.erase(entry);
+		}
+		auto batch = completed_builders->Finish();
+		if (UseDirectForumParquet()) {
+			WriteForumSnapshotParquetBlock(slice_id, batch);
+		}
+		QueueMaterializedForumBatch(slice_id, std::move(batch), materialize_delta);
+	}
+
+	void RecordForumMaterializeProfile(const LdbcProfileSample &materialize_delta) {
+		if (!LdbcPhaseProfileEnabled()) {
+			return;
+		}
+		std::lock_guard<std::mutex> lock(pending_forum_chunk_batches_lock);
+		forum_materialize_profile.wall_ms += materialize_delta.wall_ms;
+		forum_materialize_profile.user_ms += materialize_delta.user_ms;
+		forum_materialize_profile.system_ms += materialize_delta.system_ms;
+		forum_materialize_profile_calls++;
+	}
+
+	void QueueMaterializedForumBatch(idx_t block_id, ForumChunkBatch batch,
+	                                 const LdbcProfileSample &materialize_delta) {
 		std::lock_guard<std::mutex> lock(pending_forum_chunk_batches_lock);
 		if (LdbcPhaseProfileEnabled()) {
 			forum_materialize_profile.wall_ms += materialize_delta.wall_ms;
@@ -3489,6 +3554,7 @@ private:
 			auto use_prematerialized_chunks = UsePrematerializedForumChunks();
 			auto use_block_prematerialization = UseForumBlockPrematerialization();
 			LdbcForumGenerator::BlockCallback block_callback;
+			LdbcForumGenerator::SliceCallback slice_callback;
 			if (LdbcPhaseProfileEnabled()) {
 				std::cerr << "[ldbcgen] forum.prematerialize_chunks: "
 				          << (use_prematerialized_chunks ? "true" : "false")
@@ -3509,13 +3575,17 @@ private:
 				block_callback = [&](idx_t block_id, idx_t block_start, idx_t block_end, vector<LdbcForum> &forums) {
 					MaterializeForumBlock(block_id, block_start, block_end, forums);
 				};
+				slice_callback = [&](idx_t slice_id, idx_t slice_start, idx_t slice_end, vector<LdbcForum> &forums,
+				                     bool finished) {
+					MaterializeForumSlice(slice_id, slice_start, slice_end, forums, finished);
+				};
 			}
 			forum_generator = make_uniq<LdbcForumGenerator>(
 			    *config, persons, knows_edges, append_forum,
 			    [&](idx_t done, idx_t total) {
 				    SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
 			    },
-			    bind_data.threads, &context, block_callback);
+			    bind_data.threads, &context, block_callback, slice_callback);
 		}
 		LdbcProfileTimer timer("generate.forums.batch");
 		auto done = forum_generator->GenerateNext(8);
@@ -3787,6 +3857,8 @@ private:
 	idx_t knows_idx = 0;
 	unique_ptr<LdbcKnowsGenerator> knows_generator;
 	unique_ptr<LdbcForumGenerator> forum_generator;
+	std::mutex active_forum_chunk_builders_lock;
+	unordered_map<idx_t, unique_ptr<ForumChunkBuilders>> active_forum_chunk_builders;
 	std::mutex pending_forum_chunk_batches_lock;
 	unordered_map<idx_t, ForumChunkBatch> pending_forum_chunk_batches;
 	idx_t next_forum_chunk_block = 0;
