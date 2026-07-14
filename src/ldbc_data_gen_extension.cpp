@@ -2548,8 +2548,8 @@ private:
 			if (entry == active_forum_chunk_builders.end()) {
 				auto snapshot_context =
 				    UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context : nullptr;
-				auto result = active_forum_chunk_builders.emplace(
-				    slice_id, make_uniq<ForumChunkBuilders>(snapshot_context));
+				auto result =
+				    active_forum_chunk_builders.emplace(slice_id, make_uniq<ForumChunkBuilders>(snapshot_context));
 				entry = result.first;
 			}
 			builders = entry->second.get();

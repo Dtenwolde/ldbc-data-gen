@@ -2448,56 +2448,57 @@ struct LdbcForumGenerator::Impl {
 		auto generate_slices = [&]() {
 			try {
 				while (!stop.load(std::memory_order_relaxed)) {
-				auto slice_idx = next_slice.fetch_add(1);
-				if (slice_idx >= slice_count) {
-					return;
-				}
-				auto &start = slice_states[slice_idx];
-				auto &end = slice_states[slice_idx + 1];
-				LdbcRandomGeneratorFarm slice_random_farm;
-				slice_random_farm.Restore(start.random_state);
-				auto local_forum_id = start.local_forum_id;
-				auto local_message_id = start.local_message_id;
-				auto &result = results[slice_idx];
-				auto slices_per_block =
-				    (NumericCast<idx_t>(config.block_size) + LdbcForumSliceSize() - 1) / LdbcForumSliceSize();
-				auto global_slice_id = state.block_id * slices_per_block + slice_idx;
-				vector<LdbcForum> person_forums;
-				{
-					LdbcForumProfileScope slice_profile_scope(result.profile);
-					for (idx_t person_offset = start.block_offset; person_offset < end.block_offset; person_offset++) {
-						auto person = state.block[person_offset];
-						auto &output_forums = slice_callback ? person_forums : result.forums;
-						ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id,
-						              local_message_id, result.profile, output_forums);
-						if (slice_callback) {
-							result.forum_count += person_forums.size();
-							slice_callback(global_slice_id, state.block_start + start.block_offset,
-							               state.block_start + end.block_offset, person_forums, false);
+					auto slice_idx = next_slice.fetch_add(1);
+					if (slice_idx >= slice_count) {
+						return;
+					}
+					auto &start = slice_states[slice_idx];
+					auto &end = slice_states[slice_idx + 1];
+					LdbcRandomGeneratorFarm slice_random_farm;
+					slice_random_farm.Restore(start.random_state);
+					auto local_forum_id = start.local_forum_id;
+					auto local_message_id = start.local_message_id;
+					auto &result = results[slice_idx];
+					auto slices_per_block =
+					    (NumericCast<idx_t>(config.block_size) + LdbcForumSliceSize() - 1) / LdbcForumSliceSize();
+					auto global_slice_id = state.block_id * slices_per_block + slice_idx;
+					vector<LdbcForum> person_forums;
+					{
+						LdbcForumProfileScope slice_profile_scope(result.profile);
+						for (idx_t person_offset = start.block_offset; person_offset < end.block_offset;
+						     person_offset++) {
+							auto person = state.block[person_offset];
+							auto &output_forums = slice_callback ? person_forums : result.forums;
+							ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id,
+							              local_message_id, result.profile, output_forums);
+							if (slice_callback) {
+								result.forum_count += person_forums.size();
+								slice_callback(global_slice_id, state.block_start + start.block_offset,
+								               state.block_start + end.block_offset, person_forums, false);
+							}
 						}
 					}
+					if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
+					    slice_random_farm.Snapshot() != end.random_state) {
+						throw InternalException("Forum slice %llu:%llu replay diverged at person offset %llu",
+						                        static_cast<unsigned long long>(state.block_id),
+						                        static_cast<unsigned long long>(slice_idx),
+						                        static_cast<unsigned long long>(end.block_offset));
+					}
+					if (slice_callback) {
+						vector<LdbcForum> no_forums;
+						slice_callback(global_slice_id, state.block_start + start.block_offset,
+						               state.block_start + end.block_offset, no_forums, true);
+					} else {
+						result.forum_count = result.forums.size();
+					}
+					if (block_callback && !slice_callback) {
+						block_callback(global_slice_id, state.block_start + start.block_offset,
+						               state.block_start + end.block_offset, result.forums);
+						result.forums.clear();
+						result.forums.shrink_to_fit();
+					}
 				}
-				if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
-				    slice_random_farm.Snapshot() != end.random_state) {
-					throw InternalException("Forum slice %llu:%llu replay diverged at person offset %llu",
-					                        static_cast<unsigned long long>(state.block_id),
-					                        static_cast<unsigned long long>(slice_idx),
-					                        static_cast<unsigned long long>(end.block_offset));
-				}
-				if (slice_callback) {
-					vector<LdbcForum> no_forums;
-					slice_callback(global_slice_id, state.block_start + start.block_offset,
-					               state.block_start + end.block_offset, no_forums, true);
-				} else {
-					result.forum_count = result.forums.size();
-				}
-				if (block_callback && !slice_callback) {
-					block_callback(global_slice_id, state.block_start + start.block_offset,
-					               state.block_start + end.block_offset, result.forums);
-					result.forums.clear();
-					result.forums.shrink_to_fit();
-				}
-			}
 			} catch (const std::exception &) {
 				stop.store(true, std::memory_order_relaxed);
 				std::lock_guard<std::mutex> guard(worker_error_lock);
@@ -2532,8 +2533,7 @@ struct LdbcForumGenerator::Impl {
 
 	bool UseForumSliceReplay() const {
 		return (block_callback || slice_callback) && threads > 1 && LdbcForumSliceSize() > 0 &&
-		       LdbcForumSlicePrepassEnabled() &&
-		       LdbcForumSliceReplayEnabled();
+		       LdbcForumSlicePrepassEnabled() && LdbcForumSliceReplayEnabled();
 	}
 
 	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks,
@@ -2770,11 +2770,11 @@ struct LdbcForumGenerator::Impl {
 LdbcForumGenerator::LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
                                        const vector<LdbcKnowsEdge> &knows_edges,
                                        const std::function<void(LdbcForum &&forum)> &emit_forum,
-	                                   const std::function<void(idx_t done, idx_t total)> &progress, idx_t threads,
-	                                   ClientContext *context, const BlockCallback &block_callback,
-	                                   const SliceCallback &slice_callback)
-	    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context, block_callback,
-	                           slice_callback)) {
+                                       const std::function<void(idx_t done, idx_t total)> &progress, idx_t threads,
+                                       ClientContext *context, const BlockCallback &block_callback,
+                                       const SliceCallback &slice_callback)
+    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context, block_callback,
+                           slice_callback)) {
 }
 
 LdbcForumGenerator::~LdbcForumGenerator() = default;
