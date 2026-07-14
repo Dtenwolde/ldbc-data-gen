@@ -797,8 +797,8 @@ int32_t LdbcTagTextDictionary::GetRandomLargeTextSize(LdbcJavaRandom &random_tex
 	return random_text_size.NextInt(max_size - min_size) + min_size;
 }
 
-LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size,
-                                                      const vector<int32_t> &tag_ids, int32_t text_size) const {
+LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+                                                      int32_t text_size) const {
 	if (tag_ids.empty()) {
 		return {};
 	}
@@ -852,6 +852,43 @@ LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_tex
 		result = StringUtil::Replace(result, "|", " ");
 	}
 	return {std::move(result), result_length};
+}
+
+LdbcGeneratedText LdbcTagTextDictionary::ConsumeText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+                                                     int32_t text_size) const {
+	if (tag_ids.empty()) {
+		return {};
+	}
+	int32_t result_length = 0;
+	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
+	while (result_length < text_size) {
+		for (auto tag_id : tag_ids) {
+			if (result_length >= text_size) {
+				break;
+			}
+			if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_text.size() || tag_text[tag_id].empty()) {
+				throw InternalException("LDBC tag text id out of range");
+			}
+			auto tag_idx = NumericCast<idx_t>(tag_id);
+			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - result_length);
+			auto prefix_length = tag_prefix_lengths[tag_idx];
+			this_tag_text_size += prefix_length;
+			auto content_length = tag_text_lengths[tag_idx];
+			if (this_tag_text_size >= content_length) {
+				result_length += content_length;
+			} else {
+				auto starting_pos = random_text_size.NextInt(content_length - this_tag_text_size + prefix_length);
+				if (tag_text_bmp_only[tag_idx]) {
+					result_length += this_tag_text_size;
+				} else {
+					auto fragment =
+					    LdbcJavaSubstring(tag_text[tag_idx], starting_pos, this_tag_text_size - prefix_length);
+					result_length += prefix_length + LdbcJavaStringLength(fragment);
+				}
+			}
+		}
+	}
+	return {{}, std::min<int32_t>(result_length, text_size)};
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {

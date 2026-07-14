@@ -148,6 +148,8 @@ public:
 	int32_t GetRandomLargeTextSize(LdbcJavaRandom &random_text_size, int32_t min_size, int32_t max_size) const;
 	LdbcGeneratedText GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
 	                               int32_t text_size) const;
+	LdbcGeneratedText ConsumeText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+	                              int32_t text_size) const;
 
 private:
 	const LdbcTagDictionary &tags;

@@ -61,7 +61,7 @@ static idx_t LdbcForumSliceSize() {
 	static idx_t slice_size = []() {
 		auto value = std::getenv("LDBCGEN_FORUM_SLICE_SIZE");
 		if (!value) {
-			return idx_t(0);
+			return idx_t(1000);
 		}
 		auto parsed = std::strtoull(value, nullptr, 10);
 		return NumericCast<idx_t>(parsed);
@@ -70,9 +70,36 @@ static idx_t LdbcForumSliceSize() {
 }
 
 static bool LdbcForumSlicePrepassEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_FORUM_SLICE_PREPASS") != nullptr;
+	static bool enabled = []() {
+		auto value = std::getenv("LDBCGEN_FORUM_SLICE_PREPASS");
+		return !value || string(value) != "0";
+	}();
 	return enabled;
 }
+
+static bool LdbcForumSliceReplayEnabled() {
+	static bool enabled = []() {
+		auto value = std::getenv("LDBCGEN_FORUM_SLICE_REPLAY");
+		return !value || string(value) != "0";
+	}();
+	return enabled;
+}
+
+static thread_local bool ldbc_discard_generated_text = false;
+
+class LdbcDiscardGeneratedTextScope {
+public:
+	LdbcDiscardGeneratedTextScope() : previous(ldbc_discard_generated_text) {
+		ldbc_discard_generated_text = true;
+	}
+
+	~LdbcDiscardGeneratedTextScope() {
+		ldbc_discard_generated_text = previous;
+	}
+
+private:
+	bool previous;
+};
 
 class LdbcScopedProfileAccumulator {
 public:
@@ -1046,10 +1073,12 @@ static LdbcGeneratedText GeneratePostText(const LdbcDatagenConfig &config, const
 		text_size = dictionaries.tag_text.GetRandomTextSize(random, random, config.min_text_size, config.max_text_size,
 		                                                    config.ratio_reduce_text);
 	}
-	return dictionaries.tag_text.GenerateText(random, tags, text_size);
+	return ldbc_discard_generated_text ? dictionaries.tag_text.ConsumeText(random, tags, text_size)
+	                                   : dictionaries.tag_text.GenerateText(random, tags, text_size);
 }
 
-static LdbcGeneratedText GenerateCommentText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
+static LdbcGeneratedText GenerateCommentText(const LdbcDatagenConfig &config,
+                                             const LdbcPersonDictionaries &dictionaries,
                                              LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
                                              const vector<int32_t> &tags) {
 	unique_ptr<LdbcScopedProfileAccumulator> timer;
@@ -1065,7 +1094,8 @@ static LdbcGeneratedText GenerateCommentText(const LdbcDatagenConfig &config, co
 		text_size = dictionaries.tag_text.GetRandomTextSize(random, random, config.min_comment_size,
 		                                                    config.max_comment_size, config.ratio_reduce_text);
 	}
-	return dictionaries.tag_text.GenerateText(random, tags, text_size);
+	return ldbc_discard_generated_text ? dictionaries.tag_text.ConsumeText(random, tags, text_size)
+	                                   : dictionaries.tag_text.GenerateText(random, tags, text_size);
 }
 
 static int64_t NumPostsPerForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
@@ -1548,8 +1578,8 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
 				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
 				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id, forum.id,
-				                       membership.person->country_id, post_tags});
+				                       std::move(generated_text.content), content_length, membership.person->account_id,
+				                       forum.id, membership.person->country_id, post_tags});
 			}
 			auto &emitted_post = forum.posts.back();
 			LdbcActivityMessage post {
@@ -1723,16 +1753,15 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 				                       dictionaries.browsers.GetName(browser_id),
 				                       dictionaries.languages.GetLanguageName(forum.language_id),
 				                       std::move(generated_text.content), content_length, membership.person->account_id,
-				                       forum.id, country_id,
-				                       post_tag_list});
+				                       forum.id, country_id, post_tag_list});
 			} else {
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
 				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
 				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
 				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id, forum.id,
-				                       membership.person->country_id, post_tag_list});
+				                       std::move(generated_text.content), content_length, membership.person->account_id,
+				                       forum.id, membership.person->country_id, post_tag_list});
 			}
 			auto &emitted_post = forum.posts.back();
 			LdbcActivityMessage post {membership.person,
@@ -2136,12 +2165,17 @@ struct LdbcForumGenerator::Impl {
 		}
 
 		auto remaining_blocks = total_blocks - parallel_next_block;
-		auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, MaxValue<idx_t>(threads, 1));
+		auto max_concurrent_blocks = MaxValue<idx_t>(threads, 1);
+		if (UseForumSliceReplay()) {
+			max_concurrent_blocks = MaxValue<idx_t>(1, threads / 2);
+		}
+		auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, max_concurrent_blocks);
 		vector<BlockState> generated_blocks(blocks_to_generate);
+		auto slice_threads_per_block = MaxValue<idx_t>(1, threads / blocks_to_generate);
 		if (blocks_to_generate == 1) {
-			generated_blocks[0] = GenerateBlock(parallel_next_block);
+			generated_blocks[0] = GenerateBlock(parallel_next_block, slice_threads_per_block);
 		} else {
-			GenerateBlocksWithDuckDBTasks(parallel_next_block, generated_blocks);
+			GenerateBlocksWithDuckDBTasks(parallel_next_block, generated_blocks, slice_threads_per_block);
 		}
 
 		for (auto &generated_block : generated_blocks) {
@@ -2174,32 +2208,32 @@ struct LdbcForumGenerator::Impl {
 		std::cerr << "[ldbcgen] forum.block." << state.block_id << ": wall=" << std::fixed << std::setprecision(3)
 		          << state.wall_ms << " ms persons=" << (state.block_end - state.block_start)
 		          << " forums=" << state.forum_count << " posts=" << state.profile.emitted_posts
-		          << " comments=" << state.profile.emitted_comments << " post_likes="
-		          << state.profile.emitted_post_likes << " comment_likes=" << state.profile.emitted_comment_likes
+		          << " comments=" << state.profile.emitted_comments
+		          << " post_likes=" << state.profile.emitted_post_likes
+		          << " comment_likes=" << state.profile.emitted_comment_likes
 		          << " memberships=" << state.profile.memberships << "\n";
 	}
 
 	static void PrintSliceProfile(const BlockState &state) {
-		if (LdbcForumSliceSize() == 0) {
+		if (!LdbcForumBlockProfileEnabled()) {
 			return;
 		}
 		std::cerr << "[ldbcgen] forum.slice.block." << state.block_id << ": slice_size=" << LdbcForumSliceSize()
-		          << " boundaries=" << state.slice_states.size() << " snapshot=" << std::fixed
-		          << std::setprecision(3) << state.slice_snapshot_ms << " ms prepass=" << state.slice_prepass_ms
+		          << " boundaries=" << state.slice_states.size() << " snapshot=" << std::fixed << std::setprecision(3)
+		          << state.slice_snapshot_ms << " ms prepass=" << state.slice_prepass_ms
 		          << " ms final_local_forum_id=" << state.local_forum_id
 		          << " final_local_message_id=" << state.local_message_id << "\n";
 	}
 
 	static void PrintSlicePrepassProfile(idx_t block_id, const ForumSliceScanResult &scan) {
-		if (LdbcForumSliceSize() == 0) {
+		if (!LdbcForumBlockProfileEnabled()) {
 			return;
 		}
 		std::cerr << "[ldbcgen] forum.slice.prepass.block." << block_id << ": slice_size=" << LdbcForumSliceSize()
 		          << " wall=" << std::fixed << std::setprecision(3) << scan.wall_ms
 		          << " ms snapshot=" << scan.snapshot_ms << " ms boundaries=" << scan.boundary_count
 		          << " forums=" << scan.forum_count << " posts=" << scan.post_count
-		          << " comments=" << scan.comment_count
-		          << " final_local_forum_id=" << scan.final_local_forum_id
+		          << " comments=" << scan.comment_count << " final_local_forum_id=" << scan.final_local_forum_id
 		          << " final_local_message_id=" << scan.final_local_message_id << "\n";
 	}
 
@@ -2294,6 +2328,7 @@ struct LdbcForumGenerator::Impl {
 		ForumSliceScanResult result;
 		auto state = InitializeBlockState(block_index);
 		auto block_person_count = state.block_end - state.block_start;
+		LdbcDiscardGeneratedTextScope discard_text_scope;
 		LdbcForumProfileScope block_profile_scope(state.profile);
 		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
 			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
@@ -2321,11 +2356,13 @@ struct LdbcForumGenerator::Impl {
 		return result;
 	}
 
-	BlockState GenerateBlock(idx_t block_index) const {
+	BlockState GenerateBlock(idx_t block_index, idx_t slice_threads = 1) const {
 		auto start_ms = LdbcForumBlockProfileEnabled() ? LdbcPersonProfileNowMs() : 0;
 		auto state = InitializeBlockState(block_index);
-		if (LdbcForumSlicePrepassEnabled() && LdbcForumSliceSize() > 0) {
+		vector<ForumSliceState> scan_slice_states;
+		if (UseForumSliceReplay()) {
 			auto scan = CollectSliceBoundaries(block_index);
+			scan_slice_states = std::move(scan.slice_states);
 			state.has_slice_prepass = true;
 			state.slice_prepass_ms = scan.wall_ms;
 			state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
@@ -2333,24 +2370,33 @@ struct LdbcForumGenerator::Impl {
 			PrintSlicePrepassProfile(block_index, scan);
 		}
 		auto block_person_count = state.block_end - state.block_start;
-		LdbcForumProfileScope block_profile_scope(state.profile);
-		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
-			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
-				RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
-				                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
+		if (UseForumSliceReplay()) {
+			if (!state.has_slice_prepass || scan_slice_states.empty()) {
+				throw InvalidInputException(
+				    "LDBCGEN_FORUM_SLICE_REPLAY requires LDBCGEN_FORUM_SLICE_PREPASS and a non-zero slice size");
 			}
-			auto person = state.block[person_offset];
-			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-			              state.local_message_id, state.profile, state.forums);
+			ReplayForumSlices(state, scan_slice_states, slice_threads);
+		} else {
+			LdbcForumProfileScope block_profile_scope(state.profile);
+			for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
+				if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
+					RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
+					                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
+				}
+				auto person = state.block[person_offset];
+				ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
+				              state.local_message_id, state.profile, state.forums);
+			}
 		}
-		state.forum_count = state.forums.size();
+		if (!UseForumSliceReplay()) {
+			state.forum_count = state.forums.size();
+		}
 		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
 			RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
 			                 block_person_count, state.random_farm, state.local_forum_id, state.local_message_id);
 		}
-		if (state.has_slice_prepass &&
-		    (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
-		     state.slice_prepass_final_local_message_id != state.local_message_id)) {
+		if (state.has_slice_prepass && (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
+		                                state.slice_prepass_final_local_message_id != state.local_message_id)) {
 			throw InternalException("Forum slice prepass diverged for block %llu: prepass ids (%lld, %lld), "
 			                        "generation ids (%lld, %lld)",
 			                        static_cast<unsigned long long>(state.block_id),
@@ -2359,7 +2405,7 @@ struct LdbcForumGenerator::Impl {
 			                        static_cast<long long>(state.local_forum_id),
 			                        static_cast<long long>(state.local_message_id));
 		}
-		if (block_callback) {
+		if (block_callback && !UseForumSliceReplay()) {
 			block_callback(state.block_id, state.block_start, state.block_end, state.forums);
 			state.forums.clear();
 			state.forums.shrink_to_fit();
@@ -2370,13 +2416,107 @@ struct LdbcForumGenerator::Impl {
 		return state;
 	}
 
-	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks) {
+	void ReplayForumSlices(BlockState &state, const vector<ForumSliceState> &slice_states, idx_t slice_threads) const {
+		D_ASSERT(slice_states.size() >= 2);
+		state.slice_states = slice_states;
+		struct SliceResult {
+			vector<LdbcForum> forums;
+			LdbcForumGenerationProfile profile;
+			idx_t forum_count = 0;
+		};
+		auto slice_count = slice_states.size() - 1;
+		vector<SliceResult> results(slice_count);
+		std::atomic<idx_t> next_slice(0);
+		std::atomic<bool> stop(false);
+		std::exception_ptr worker_error;
+		std::mutex worker_error_lock;
+		auto generate_slices = [&]() {
+			try {
+				while (!stop.load(std::memory_order_relaxed)) {
+				auto slice_idx = next_slice.fetch_add(1);
+				if (slice_idx >= slice_count) {
+					return;
+				}
+				auto &start = slice_states[slice_idx];
+				auto &end = slice_states[slice_idx + 1];
+				LdbcRandomGeneratorFarm slice_random_farm;
+				slice_random_farm.Restore(start.random_state);
+				auto local_forum_id = start.local_forum_id;
+				auto local_message_id = start.local_message_id;
+				auto &result = results[slice_idx];
+				{
+					LdbcForumProfileScope slice_profile_scope(result.profile);
+					for (idx_t person_offset = start.block_offset; person_offset < end.block_offset; person_offset++) {
+						auto person = state.block[person_offset];
+						ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id,
+						              local_message_id, result.profile, result.forums);
+					}
+				}
+				if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
+				    slice_random_farm.Snapshot() != end.random_state) {
+					throw InternalException("Forum slice %llu:%llu replay diverged at person offset %llu",
+					                        static_cast<unsigned long long>(state.block_id),
+					                        static_cast<unsigned long long>(slice_idx),
+					                        static_cast<unsigned long long>(end.block_offset));
+				}
+				result.forum_count = result.forums.size();
+				if (block_callback) {
+					auto slices_per_block =
+					    (NumericCast<idx_t>(config.block_size) + LdbcForumSliceSize() - 1) / LdbcForumSliceSize();
+					auto global_slice_id = state.block_id * slices_per_block + slice_idx;
+					block_callback(global_slice_id, state.block_start + start.block_offset,
+					               state.block_start + end.block_offset, result.forums);
+					result.forums.clear();
+					result.forums.shrink_to_fit();
+				}
+			}
+			} catch (...) {
+				stop.store(true, std::memory_order_relaxed);
+				std::lock_guard<std::mutex> guard(worker_error_lock);
+				if (!worker_error) {
+					worker_error = std::current_exception();
+				}
+			}
+		};
+		auto worker_count = MinValue<idx_t>(MaxValue<idx_t>(slice_threads, 1), slice_count);
+		vector<std::thread> workers;
+		workers.reserve(worker_count > 0 ? worker_count - 1 : 0);
+		for (idx_t worker_idx = 1; worker_idx < worker_count; worker_idx++) {
+			workers.emplace_back(generate_slices);
+		}
+		generate_slices();
+		for (auto &worker : workers) {
+			worker.join();
+		}
+		if (worker_error) {
+			std::rethrow_exception(worker_error);
+		}
+		for (auto &result : results) {
+			MergeForumGenerationProfile(state.profile, result.profile);
+			state.forum_count += result.forum_count;
+			for (auto &forum : result.forums) {
+				state.forums.push_back(std::move(forum));
+			}
+		}
+		state.local_forum_id = slice_states.back().local_forum_id;
+		state.local_message_id = slice_states.back().local_message_id;
+	}
+
+	bool UseForumSliceReplay() const {
+		return block_callback && threads > 1 && LdbcForumSliceSize() > 0 && LdbcForumSlicePrepassEnabled() &&
+		       LdbcForumSliceReplayEnabled();
+	}
+
+	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks,
+	                                   idx_t slice_threads_per_block) {
 		class LdbcForumBlockTask : public BaseExecutorTask {
 		public:
 			LdbcForumBlockTask(TaskExecutor &executor, const Impl &generator, idx_t first_block,
-			                   vector<BlockState> &generated_blocks, std::atomic<idx_t> &next_block)
+			                   vector<BlockState> &generated_blocks, std::atomic<idx_t> &next_block,
+			                   idx_t slice_threads_per_block)
 			    : BaseExecutorTask(executor), generator(generator), first_block(first_block),
-			      generated_blocks(generated_blocks), next_block(next_block) {
+			      generated_blocks(generated_blocks), next_block(next_block),
+			      slice_threads_per_block(slice_threads_per_block) {
 			}
 
 			void ExecuteTask() override {
@@ -2385,7 +2525,8 @@ struct LdbcForumGenerator::Impl {
 					if (local_block >= generated_blocks.size()) {
 						break;
 					}
-					generated_blocks[local_block] = generator.GenerateBlock(first_block + local_block);
+					generated_blocks[local_block] =
+					    generator.GenerateBlock(first_block + local_block, slice_threads_per_block);
 				}
 			}
 
@@ -2398,14 +2539,15 @@ struct LdbcForumGenerator::Impl {
 			idx_t first_block;
 			vector<BlockState> &generated_blocks;
 			std::atomic<idx_t> &next_block;
+			idx_t slice_threads_per_block;
 		};
 
 		std::atomic<idx_t> next_block(0);
 		TaskExecutor executor(*context);
 		auto worker_count = MinValue<idx_t>(threads, generated_blocks.size());
 		for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
-			executor.ScheduleTask(
-			    make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks, next_block));
+			executor.ScheduleTask(make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks,
+			                                                    next_block, slice_threads_per_block));
 		}
 		executor.WorkOnTasks();
 	}
