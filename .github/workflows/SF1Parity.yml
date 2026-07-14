@@ -33,7 +33,7 @@ jobs:
             sf1-parity-${{ runner.os }}-
 
       - name: Build release extension
-        run: make release
+        run: GEN=ninja make release
 
       - name: Verify SF1 parity
         run: |
