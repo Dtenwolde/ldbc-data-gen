@@ -101,6 +101,11 @@ static bool LdbcChunkProfileEnabled() {
 	return enabled;
 }
 
+static bool LdbcDirectSnapshotCollectionsEnabled() {
+	static bool enabled = std::getenv("LDBCGEN_DIRECT_SNAPSHOT_CHUNKS") == nullptr;
+	return enabled;
+}
+
 static double ldbc_chunk_flush_ms = 0;
 static idx_t ldbc_chunk_flush_calls = 0;
 
@@ -328,6 +333,8 @@ static vector<string> LdbcInsertColumnNames(const string &relation_name);
 static vector<string> LdbcDeleteColumnNames(const string &relation_name);
 static void WriteLdbcChunksToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
                                      const vector<string> &names, vector<unique_ptr<DataChunk>> &chunks);
+static void WriteLdbcCollectionToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
+                                         const vector<string> &names, ColumnDataCollection &collection);
 
 struct LdbcGenGlobalState : public GlobalTableFunctionState {
 	bool schema_created = false;
@@ -1019,8 +1026,13 @@ private:
 
 class LdbcChunkBuilder {
 public:
-	explicit LdbcChunkBuilder(vector<LogicalType> types_p) : types(std::move(types_p)) {
+	explicit LdbcChunkBuilder(vector<LogicalType> types_p, ClientContext *collection_context = nullptr)
+	    : types(std::move(types_p)) {
 		chunk.Initialize(Allocator::DefaultAllocator(), types);
+		if (collection_context) {
+			collection = make_uniq<ColumnDataCollection>(*collection_context, types);
+			collection->InitializeAppend(collection_append_state);
+		}
 	}
 
 	void AppendTimestampMs(idx_t column, idx_t row_index, int64_t value) {
@@ -1084,16 +1096,26 @@ public:
 		return std::move(chunks);
 	}
 
+	unique_ptr<ColumnDataCollection> TakeCollection() {
+		Flush();
+		return std::move(collection);
+	}
+
 private:
 	void Flush() {
 		if (row == 0) {
 			return;
 		}
 		chunk.SetCardinality(row);
-		auto flushed_chunk = make_uniq<DataChunk>();
-		flushed_chunk->Move(chunk);
-		chunks.push_back(std::move(flushed_chunk));
-		chunk.Initialize(Allocator::DefaultAllocator(), types);
+		if (collection) {
+			collection->Append(collection_append_state, chunk);
+			chunk.Reset();
+		} else {
+			auto flushed_chunk = make_uniq<DataChunk>();
+			flushed_chunk->Move(chunk);
+			chunks.push_back(std::move(flushed_chunk));
+			chunk.Initialize(Allocator::DefaultAllocator(), types);
+		}
 		row = 0;
 	}
 
@@ -1101,6 +1123,8 @@ private:
 	vector<LogicalType> types;
 	DataChunk chunk;
 	vector<unique_ptr<DataChunk>> chunks;
+	unique_ptr<ColumnDataCollection> collection;
+	ColumnDataAppendState collection_append_state;
 	idx_t row = 0;
 };
 
@@ -2103,6 +2127,15 @@ private:
 		vector<unique_ptr<DataChunk>> comment_tags;
 		vector<unique_ptr<DataChunk>> post_likes;
 		vector<unique_ptr<DataChunk>> comment_likes;
+		unique_ptr<ColumnDataCollection> forum_collection;
+		unique_ptr<ColumnDataCollection> forum_tag_collection;
+		unique_ptr<ColumnDataCollection> forum_member_collection;
+		unique_ptr<ColumnDataCollection> post_collection;
+		unique_ptr<ColumnDataCollection> post_tag_collection;
+		unique_ptr<ColumnDataCollection> comment_collection;
+		unique_ptr<ColumnDataCollection> comment_tag_collection;
+		unique_ptr<ColumnDataCollection> post_like_collection;
+		unique_ptr<ColumnDataCollection> comment_like_collection;
 		vector<unique_ptr<DataChunk>> insert_forums;
 		vector<unique_ptr<DataChunk>> insert_forum_tags;
 		vector<unique_ptr<DataChunk>> insert_forum_members;
@@ -2127,6 +2160,11 @@ private:
 		vector<unique_ptr<DataChunk>> study_at;
 		vector<unique_ptr<DataChunk>> work_at;
 		vector<unique_ptr<DataChunk>> knows;
+		unique_ptr<ColumnDataCollection> persons_collection;
+		unique_ptr<ColumnDataCollection> interests_collection;
+		unique_ptr<ColumnDataCollection> study_at_collection;
+		unique_ptr<ColumnDataCollection> work_at_collection;
+		unique_ptr<ColumnDataCollection> knows_collection;
 	};
 
 	struct ForumChunkBuilders {
@@ -2155,20 +2193,23 @@ private:
 		LdbcChunkBuilder delete_post_likes;
 		LdbcChunkBuilder delete_comment_likes;
 
-		ForumChunkBuilders()
-		    : forums({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::BIGINT}),
-		      forum_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}),
-		      forum_members({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}),
+		ForumChunkBuilders(ClientContext *snapshot_context)
+		    : forums({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::BIGINT},
+		             snapshot_context),
+		      forum_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}, snapshot_context),
+		      forum_members({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}, snapshot_context),
 		      posts({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::VARCHAR,
 		             LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::INTEGER,
-		             LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT}),
-		      post_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}),
+		             LogicalType::BIGINT, LogicalType::BIGINT, LogicalType::BIGINT},
+		            snapshot_context),
+		      post_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}, snapshot_context),
 		      comments({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR, LogicalType::VARCHAR,
 		                LogicalType::VARCHAR, LogicalType::INTEGER, LogicalType::BIGINT, LogicalType::INTEGER,
-		                LogicalType::BIGINT, LogicalType::BIGINT}),
-		      comment_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}),
-		      post_likes({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}),
-		      comment_likes({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}),
+		                LogicalType::BIGINT, LogicalType::BIGINT},
+		               snapshot_context),
+		      comment_tags({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER}, snapshot_context),
+		      post_likes({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}, snapshot_context),
+		      comment_likes({LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT}, snapshot_context),
 		      insert_forums({LogicalType::DATE, LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::VARCHAR,
 		                     LogicalType::BIGINT}),
 		      insert_forum_tags(
@@ -2211,6 +2252,15 @@ private:
 			batch.comment_tags = comment_tags.Finish();
 			batch.post_likes = post_likes.Finish();
 			batch.comment_likes = comment_likes.Finish();
+			batch.forum_collection = forums.TakeCollection();
+			batch.forum_tag_collection = forum_tags.TakeCollection();
+			batch.forum_member_collection = forum_members.TakeCollection();
+			batch.post_collection = posts.TakeCollection();
+			batch.post_tag_collection = post_tags.TakeCollection();
+			batch.comment_collection = comments.TakeCollection();
+			batch.comment_tag_collection = comment_tags.TakeCollection();
+			batch.post_like_collection = post_likes.TakeCollection();
+			batch.comment_like_collection = comment_likes.TakeCollection();
 			batch.insert_forums = insert_forums.Finish();
 			batch.insert_forum_tags = insert_forum_tags.Finish();
 			batch.insert_forum_members = insert_forum_members.Finish();
@@ -2300,7 +2350,8 @@ private:
 	}
 
 	void MaterializeForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBatch &target) const {
-		ForumChunkBuilders builders;
+		ForumChunkBuilders builders(UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context
+		                                                                                              : nullptr);
 		for (idx_t forum_idx = start; forum_idx < end; forum_idx++) {
 			auto &forum = forums[forum_idx];
 			if (IsSnapshotRow(forum.creation_date)) {
@@ -2505,7 +2556,29 @@ private:
 		chunks.shrink_to_fit();
 	}
 
+	void WriteSnapshotParquetBlock(idx_t block_id, const string &relation_name,
+	                               unique_ptr<ColumnDataCollection> &collection) {
+		if (!collection || collection->Count() == 0) {
+			return;
+		}
+		auto relation_index = LdbcRelationIndexByName(relation_name);
+		auto &relation = LdbcRelationAt(relation_index);
+		auto path = LdbcSparkRelationBlockPartPath(context, bind_data, "initial_snapshot", relation, block_id);
+		WriteLdbcCollectionToParquet(context, path, LdbcRelationTypes(relation_name),
+		                             LdbcRelationColumnNames(relation_name), *collection);
+		collection.reset();
+	}
+
 	void WriteForumSnapshotParquetBlock(idx_t block_id, ForumChunkBatch &batch) {
+		WriteSnapshotParquetBlock(block_id, "Forum", batch.forum_collection);
+		WriteSnapshotParquetBlock(block_id, "Forum_hasTag_Tag", batch.forum_tag_collection);
+		WriteSnapshotParquetBlock(block_id, "Forum_hasMember_Person", batch.forum_member_collection);
+		WriteSnapshotParquetBlock(block_id, "Post", batch.post_collection);
+		WriteSnapshotParquetBlock(block_id, "Post_hasTag_Tag", batch.post_tag_collection);
+		WriteSnapshotParquetBlock(block_id, "Comment", batch.comment_collection);
+		WriteSnapshotParquetBlock(block_id, "Comment_hasTag_Tag", batch.comment_tag_collection);
+		WriteSnapshotParquetBlock(block_id, "Person_likes_Post", batch.post_like_collection);
+		WriteSnapshotParquetBlock(block_id, "Person_likes_Comment", batch.comment_like_collection);
 		WriteSnapshotParquetBlock(block_id, "Forum", batch.forums);
 		WriteSnapshotParquetBlock(block_id, "Forum_hasTag_Tag", batch.forum_tags);
 		WriteSnapshotParquetBlock(block_id, "Forum_hasMember_Person", batch.forum_members);
@@ -2521,11 +2594,12 @@ private:
 		if (!UseDirectPersonParquet() || person_snapshot_builders_initialized) {
 			return;
 		}
-		person_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person"));
-		interest_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_hasInterest_Tag"));
-		study_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_studyAt_University"));
-		work_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_workAt_Company"));
-		knows_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_knows_Person"));
+		auto collection_context = LdbcDirectSnapshotCollectionsEnabled() ? &context : nullptr;
+		person_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person"), collection_context);
+		interest_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_hasInterest_Tag"), collection_context);
+		study_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_studyAt_University"), collection_context);
+		work_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_workAt_Company"), collection_context);
+		knows_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_knows_Person"), collection_context);
 		person_snapshot_builders_initialized = true;
 	}
 
@@ -2546,6 +2620,14 @@ private:
 		if (work_builder) {
 			batch.work_at = work_builder->Finish();
 		}
+		batch.persons_collection = person_builder ? person_builder->TakeCollection() : nullptr;
+		batch.interests_collection = interest_builder ? interest_builder->TakeCollection() : nullptr;
+		batch.study_at_collection = study_builder ? study_builder->TakeCollection() : nullptr;
+		batch.work_at_collection = work_builder ? work_builder->TakeCollection() : nullptr;
+		WriteSnapshotParquetBlock(0, "Person", batch.persons_collection);
+		WriteSnapshotParquetBlock(0, "Person_hasInterest_Tag", batch.interests_collection);
+		WriteSnapshotParquetBlock(0, "Person_studyAt_University", batch.study_at_collection);
+		WriteSnapshotParquetBlock(0, "Person_workAt_Company", batch.work_at_collection);
 		WriteSnapshotParquetBlock(0, "Person", batch.persons);
 		WriteSnapshotParquetBlock(0, "Person_hasInterest_Tag", batch.interests);
 		WriteSnapshotParquetBlock(0, "Person_studyAt_University", batch.study_at);
@@ -2565,6 +2647,8 @@ private:
 		if (knows_builder) {
 			batch.knows = knows_builder->Finish();
 		}
+		batch.knows_collection = knows_builder ? knows_builder->TakeCollection() : nullptr;
+		WriteSnapshotParquetBlock(0, "Person_knows_Person", batch.knows_collection);
 		WriteSnapshotParquetBlock(0, "Person_knows_Person", batch.knows);
 		knows_builder.reset();
 		knows_snapshot_parquet_flushed = true;
@@ -3927,7 +4011,14 @@ static void WriteLdbcChunksToParquet(ClientContext &context, const string &path,
 	for (auto &chunk : chunks) {
 		collection.Append(append_state, *chunk);
 	}
+	WriteLdbcCollectionToParquet(context, path, types, names, collection);
+}
 
+static void WriteLdbcCollectionToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
+                                         const vector<string> &names, ColumnDataCollection &collection) {
+	if (collection.Count() == 0) {
+		return;
+	}
 	auto &fs = FileSystem::GetFileSystem(context);
 	ParquetWriterOptions options;
 	options.file_name = path;
