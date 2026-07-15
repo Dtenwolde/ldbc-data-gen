@@ -84,6 +84,16 @@ ORDER BY relation_name, operation, column_index;
 
 This returns one row per BI column, including `relation_name`, `entity_path`, `kind`, `operation`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`. `operation` is one of `initial_snapshot`, `inserts`, or `deletes`.
 
+## Performance
+
+An SF100 BI Parquet dataset completes with the default DuckDB thread count on a 36 GB laptop:
+
+| SF | Threads | Wall time | Peak RSS | Output | Parquet files |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 18 (default) | 2:19.12 | 15.8 GiB | 20 GiB | 9,517 |
+
+This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `2650e5eb3b26`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. Every generated Parquet footer was read successfully after the run. See [the performance notes](docs/performance.md) for the exact command, measurement details, and historical results.
+
 ## BI Queries
 
 The extension includes all 20 LDBC SNB BI queries. They can be run with a

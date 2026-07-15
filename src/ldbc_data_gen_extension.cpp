@@ -2594,6 +2594,8 @@ private:
 				    SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
 			    },
 			    bind_data.threads, &context, block_callback, slice_callback);
+			knows_edges.clear();
+			knows_edges.shrink_to_fit();
 		}
 		auto done = forum_generator->GenerateNext(8);
 		if (UseForumBlockPrematerialization()) {

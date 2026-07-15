@@ -1798,9 +1798,9 @@ struct LdbcForumGenerator::Impl {
 	     const std::function<void(idx_t done, idx_t total)> &progress_p, idx_t threads_p, ClientContext *context_p,
 	     const LdbcForumGenerator::BlockCallback &block_callback_p,
 	     const LdbcForumGenerator::SliceCallback &slice_callback_p)
-	    : config(config_p), persons(persons_p), knows_edges(knows_edges_p), emit_forum(emit_forum_p),
-	      progress(progress_p), threads(MaxValue<idx_t>(threads_p, 1)), context(context_p),
-	      block_callback(block_callback_p), slice_callback(slice_callback_p), dates(config),
+	    : config(config_p), persons(persons_p), emit_forum(emit_forum_p), progress(progress_p),
+	      threads(MaxValue<idx_t>(threads_p, 1)), context(context_p), block_callback(block_callback_p),
+	      slice_callback(slice_callback_p), dates(config),
 	      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
 	                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ),
 	      flashmobs(config, dates, dictionaries), flashmob_dates(config.resource_dir),
@@ -1812,7 +1812,7 @@ struct LdbcForumGenerator::Impl {
 			}
 		}
 		{
-			for (auto &edge : knows_edges) {
+			for (auto &edge : knows_edges_p) {
 				auto left = persons_by_id.find(edge.person1_id);
 				auto right = persons_by_id.find(edge.person2_id);
 				if (left == persons_by_id.end() || right == persons_by_id.end()) {
@@ -2353,7 +2353,6 @@ struct LdbcForumGenerator::Impl {
 
 	const LdbcDatagenConfig &config;
 	const vector<LdbcPersonCore> &persons;
-	const vector<LdbcKnowsEdge> &knows_edges;
 	std::function<void(LdbcForum &&forum)> emit_forum;
 	std::function<void(idx_t done, idx_t total)> progress;
 	idx_t threads;
