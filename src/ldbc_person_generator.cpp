@@ -1944,6 +1944,12 @@ struct LdbcForumGenerator::Impl {
 		vector<ForumSliceState> slice_states;
 	};
 
+	struct PreparedForumBlock {
+		BlockState state;
+		vector<ForumSliceState> slice_states;
+		vector<vector<LdbcForum>> slice_forums;
+	};
+
 	bool GenerateNext(idx_t max_persons) {
 		if (threads > 1 && context) {
 			return GenerateNextParallel(max_persons);
@@ -1965,14 +1971,12 @@ struct LdbcForumGenerator::Impl {
 			}
 			processed_persons++;
 			generated++;
-			if (progress && ((processed_persons & 15) == 0)) {
-				progress(processed_persons, random_ranked_persons.size());
+			if ((processed_persons & 15) == 0) {
+				ReportProgress(processed_persons);
 			}
 		}
 		if (processed_persons >= random_ranked_persons.size()) {
-			if (progress) {
-				progress(random_ranked_persons.size(), random_ranked_persons.size());
-			}
+			ReportProgress(random_ranked_persons.size());
 			return true;
 		}
 		return false;
@@ -1982,9 +1986,7 @@ struct LdbcForumGenerator::Impl {
 		auto block_size = NumericCast<idx_t>(config.block_size);
 		auto total_blocks = (random_ranked_persons.size() + block_size - 1) / block_size;
 		if (parallel_next_block >= total_blocks) {
-			if (progress) {
-				progress(random_ranked_persons.size(), random_ranked_persons.size());
-			}
+			ReportProgress(random_ranked_persons.size());
 			return true;
 		}
 
@@ -1995,11 +1997,12 @@ struct LdbcForumGenerator::Impl {
 		}
 		auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, max_concurrent_blocks);
 		vector<BlockState> generated_blocks(blocks_to_generate);
-		auto slice_threads_per_block = MaxValue<idx_t>(1, threads / blocks_to_generate);
-		if (blocks_to_generate == 1) {
-			generated_blocks[0] = GenerateBlock(parallel_next_block, slice_threads_per_block);
+		if (UseForumSliceReplay()) {
+			GenerateBlocksWithGlobalSliceTasks(parallel_next_block, generated_blocks);
+		} else if (blocks_to_generate == 1) {
+			generated_blocks[0] = GenerateBlock(parallel_next_block);
 		} else {
-			GenerateBlocksWithDuckDBTasks(parallel_next_block, generated_blocks, slice_threads_per_block);
+			GenerateBlocksWithDuckDBTasks(parallel_next_block, generated_blocks);
 		}
 
 		for (auto &generated_block : generated_blocks) {
@@ -2007,16 +2010,12 @@ struct LdbcForumGenerator::Impl {
 				Emit(std::move(forum));
 			}
 			processed_persons += generated_block.block_end - generated_block.block_start;
-			if (progress) {
-				progress(processed_persons, random_ranked_persons.size());
-			}
+			ReportProgress(processed_persons);
 		}
 		parallel_next_block += blocks_to_generate;
 		block_start = parallel_next_block * block_size;
 		if (processed_persons >= random_ranked_persons.size()) {
-			if (progress) {
-				progress(random_ranked_persons.size(), random_ranked_persons.size());
-			}
+			ReportProgress(random_ranked_persons.size());
 			return true;
 		}
 		return false;
@@ -2048,7 +2047,20 @@ struct LdbcForumGenerator::Impl {
 		if (random_ranked_persons.empty()) {
 			return 100.0;
 		}
-		return 100.0 * (static_cast<double>(processed_persons) / static_cast<double>(random_ranked_persons.size()));
+		auto completed_persons = MaxValue<idx_t>(processed_persons, replayed_persons.load());
+		return 100.0 * (static_cast<double>(completed_persons) / static_cast<double>(random_ranked_persons.size()));
+	}
+
+	void ReportProgress(idx_t completed_persons) const {
+		if (!progress) {
+			return;
+		}
+		std::lock_guard<std::mutex> guard(progress_lock);
+		if (completed_persons <= reported_persons) {
+			return;
+		}
+		reported_persons = completed_persons;
+		progress(completed_persons, random_ranked_persons.size());
 	}
 
 	vector<LdbcForum> ReleaseForums() {
@@ -2126,38 +2138,14 @@ struct LdbcForumGenerator::Impl {
 		return result;
 	}
 
-	BlockState GenerateBlock(idx_t block_index, idx_t slice_threads = 1) const {
+	BlockState GenerateBlock(idx_t block_index) const {
 		auto state = InitializeBlockState(block_index);
-		vector<ForumSliceState> scan_slice_states;
-		if (UseForumSliceReplay()) {
-			auto scan = CollectSliceBoundaries(block_index);
-			scan_slice_states = std::move(scan.slice_states);
-			state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
-			state.slice_prepass_final_local_message_id = scan.final_local_message_id;
+		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
+			auto person = state.block[person_offset];
+			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
+			              state.local_message_id, state.forums);
 		}
-		if (UseForumSliceReplay()) {
-			if (scan_slice_states.empty()) {
-				throw InternalException("Forum slice prepass did not produce replay boundaries");
-			}
-			ReplayForumSlices(state, scan_slice_states, slice_threads);
-		} else {
-			for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
-				auto person = state.block[person_offset];
-				ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-				              state.local_message_id, state.forums);
-			}
-		}
-		if (UseForumSliceReplay() && (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
-		                              state.slice_prepass_final_local_message_id != state.local_message_id)) {
-			throw InternalException("Forum slice prepass diverged for block %llu: prepass ids (%lld, %lld), "
-			                        "generation ids (%lld, %lld)",
-			                        static_cast<unsigned long long>(state.block_id),
-			                        static_cast<long long>(state.slice_prepass_final_local_forum_id),
-			                        static_cast<long long>(state.slice_prepass_final_local_message_id),
-			                        static_cast<long long>(state.local_forum_id),
-			                        static_cast<long long>(state.local_message_id));
-		}
-		if (block_callback && !UseForumSliceReplay()) {
+		if (block_callback) {
 			block_callback(state.block_id, state.block_start, state.block_end, state.forums);
 			state.forums.clear();
 			state.forums.shrink_to_fit();
@@ -2165,111 +2153,158 @@ struct LdbcForumGenerator::Impl {
 		return state;
 	}
 
-	void ReplayForumSlices(BlockState &state, const vector<ForumSliceState> &slice_states, idx_t slice_threads) const {
-		D_ASSERT(slice_states.size() >= 2);
-		struct SliceResult {
-			vector<LdbcForum> forums;
-		};
-		auto slice_count = slice_states.size() - 1;
-		vector<SliceResult> results(slice_count);
-		std::atomic<idx_t> next_slice(0);
-		std::atomic<bool> stop(false);
-		std::exception_ptr worker_error;
-		std::mutex worker_error_lock;
-		auto generate_slices = [&]() {
-			try {
-				while (!stop.load(std::memory_order_relaxed)) {
-					auto slice_idx = next_slice.fetch_add(1);
-					if (slice_idx >= slice_count) {
-						return;
-					}
-					auto &start = slice_states[slice_idx];
-					auto &end = slice_states[slice_idx + 1];
-					LdbcRandomGeneratorFarm slice_random_farm;
-					slice_random_farm.Restore(start.random_state);
-					auto local_forum_id = start.local_forum_id;
-					auto local_message_id = start.local_message_id;
-					auto &result = results[slice_idx];
-					auto slices_per_block =
-					    (NumericCast<idx_t>(config.block_size) + LDBC_FORUM_SLICE_SIZE - 1) / LDBC_FORUM_SLICE_SIZE;
-					auto global_slice_id = state.block_id * slices_per_block + slice_idx;
-					vector<LdbcForum> person_forums;
-					{
-						for (idx_t person_offset = start.block_offset; person_offset < end.block_offset;
-						     person_offset++) {
-							auto person = state.block[person_offset];
-							auto &output_forums = slice_callback ? person_forums : result.forums;
-							ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id,
-							              local_message_id, output_forums);
-							if (slice_callback) {
-								slice_callback(global_slice_id, state.block_start + start.block_offset,
-								               state.block_start + end.block_offset, person_forums, false);
-							}
-						}
-					}
-					if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
-					    slice_random_farm.Snapshot() != end.random_state) {
-						throw InternalException("Forum slice %llu:%llu replay diverged at person offset %llu",
-						                        static_cast<unsigned long long>(state.block_id),
-						                        static_cast<unsigned long long>(slice_idx),
-						                        static_cast<unsigned long long>(end.block_offset));
-					}
-					if (slice_callback) {
-						vector<LdbcForum> no_forums;
-						slice_callback(global_slice_id, state.block_start + start.block_offset,
-						               state.block_start + end.block_offset, no_forums, true);
-					}
-					if (block_callback && !slice_callback) {
-						block_callback(global_slice_id, state.block_start + start.block_offset,
-						               state.block_start + end.block_offset, result.forums);
-						result.forums.clear();
-						result.forums.shrink_to_fit();
-					}
-				}
-			} catch (const std::exception &) {
-				stop.store(true, std::memory_order_relaxed);
-				std::lock_guard<std::mutex> guard(worker_error_lock);
-				if (!worker_error) {
-					worker_error = std::current_exception();
-				}
-			}
-		};
-		auto worker_count = MinValue<idx_t>(MaxValue<idx_t>(slice_threads, 1), slice_count);
-		vector<std::thread> workers;
-		workers.reserve(worker_count > 0 ? worker_count - 1 : 0);
-		for (idx_t worker_idx = 1; worker_idx < worker_count; worker_idx++) {
-			workers.emplace_back(generate_slices);
+	PreparedForumBlock PrepareForumBlock(idx_t block_index) const {
+		PreparedForumBlock result;
+		result.state = InitializeBlockState(block_index);
+		auto scan = CollectSliceBoundaries(block_index);
+		if (scan.slice_states.size() < 2) {
+			throw InternalException("Forum slice prepass did not produce replay boundaries");
 		}
-		generate_slices();
-		for (auto &worker : workers) {
-			worker.join();
-		}
-		if (worker_error) {
-			std::rethrow_exception(worker_error);
-		}
-		for (auto &result : results) {
-			for (auto &forum : result.forums) {
-				state.forums.push_back(std::move(forum));
+		result.state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
+		result.state.slice_prepass_final_local_message_id = scan.final_local_message_id;
+		result.slice_states = std::move(scan.slice_states);
+		result.slice_forums.resize(result.slice_states.size() - 1);
+		return result;
+	}
+
+	void ReplayForumSlice(PreparedForumBlock &block, idx_t slice_index) const {
+		auto &state = block.state;
+		auto &start = block.slice_states[slice_index];
+		auto &end = block.slice_states[slice_index + 1];
+		LdbcRandomGeneratorFarm slice_random_farm;
+		slice_random_farm.Restore(start.random_state);
+		auto local_forum_id = start.local_forum_id;
+		auto local_message_id = start.local_message_id;
+		auto &slice_forums = block.slice_forums[slice_index];
+		auto slices_per_block =
+		    (NumericCast<idx_t>(config.block_size) + LDBC_FORUM_SLICE_SIZE - 1) / LDBC_FORUM_SLICE_SIZE;
+		auto global_slice_id = state.block_id * slices_per_block + slice_index;
+		vector<LdbcForum> person_forums;
+		for (idx_t person_offset = start.block_offset; person_offset < end.block_offset; person_offset++) {
+			auto person = state.block[person_offset];
+			auto &output_forums = slice_callback ? person_forums : slice_forums;
+			ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id, local_message_id,
+			              output_forums);
+			if (slice_callback) {
+				slice_callback(global_slice_id, state.block_start + start.block_offset,
+				               state.block_start + end.block_offset, person_forums, false);
 			}
 		}
-		state.local_forum_id = slice_states.back().local_forum_id;
-		state.local_message_id = slice_states.back().local_message_id;
+		if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
+		    slice_random_farm.Snapshot() != end.random_state) {
+			throw InternalException("Forum slice %llu:%llu replay diverged at person offset %llu",
+			                        static_cast<unsigned long long>(state.block_id),
+			                        static_cast<unsigned long long>(slice_index),
+			                        static_cast<unsigned long long>(end.block_offset));
+		}
+		if (slice_callback) {
+			vector<LdbcForum> no_forums;
+			slice_callback(global_slice_id, state.block_start + start.block_offset,
+			               state.block_start + end.block_offset, no_forums, true);
+		}
+		if (block_callback && !slice_callback) {
+			block_callback(global_slice_id, state.block_start + start.block_offset,
+			               state.block_start + end.block_offset, slice_forums);
+			slice_forums.clear();
+			slice_forums.shrink_to_fit();
+		}
+		auto person_count = end.block_offset - start.block_offset;
+		auto completed_persons = replayed_persons.fetch_add(person_count) + person_count;
+		ReportProgress(completed_persons);
+	}
+
+	BlockState FinishForumBlock(PreparedForumBlock &block) const {
+		for (auto &slice_forums : block.slice_forums) {
+			for (auto &forum : slice_forums) {
+				block.state.forums.push_back(std::move(forum));
+			}
+		}
+		block.state.local_forum_id = block.slice_states.back().local_forum_id;
+		block.state.local_message_id = block.slice_states.back().local_message_id;
+		if (block.state.slice_prepass_final_local_forum_id != block.state.local_forum_id ||
+		    block.state.slice_prepass_final_local_message_id != block.state.local_message_id) {
+			throw InternalException("Forum slice prepass diverged for block %llu: prepass ids (%lld, %lld), "
+			                        "generation ids (%lld, %lld)",
+			                        static_cast<unsigned long long>(block.state.block_id),
+			                        static_cast<long long>(block.state.slice_prepass_final_local_forum_id),
+			                        static_cast<long long>(block.state.slice_prepass_final_local_message_id),
+			                        static_cast<long long>(block.state.local_forum_id),
+			                        static_cast<long long>(block.state.local_message_id));
+		}
+		return std::move(block.state);
 	}
 
 	bool UseForumSliceReplay() const {
 		return (block_callback || slice_callback) && threads > 1;
 	}
 
-	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks,
-	                                   idx_t slice_threads_per_block) {
+	void GenerateBlocksWithGlobalSliceTasks(idx_t first_block, vector<BlockState> &generated_blocks) {
+		vector<PreparedForumBlock> prepared_blocks(generated_blocks.size());
+		class LdbcForumSliceTask : public BaseExecutorTask {
+		public:
+			LdbcForumSliceTask(TaskExecutor &executor, const Impl &generator, PreparedForumBlock &block,
+			                   idx_t slice_index)
+			    : BaseExecutorTask(executor), generator(generator), block(block), slice_index(slice_index) {
+			}
+
+			void ExecuteTask() override {
+				generator.ReplayForumSlice(block, slice_index);
+			}
+
+			string TaskType() const override {
+				return "LdbcForumSliceTask";
+			}
+
+		private:
+			const Impl &generator;
+			PreparedForumBlock &block;
+			idx_t slice_index;
+		};
+
+		class LdbcForumPrepareTask : public BaseExecutorTask {
+		public:
+			LdbcForumPrepareTask(TaskExecutor &executor, const Impl &generator, idx_t block_index,
+			                     PreparedForumBlock &block)
+			    : BaseExecutorTask(executor), generator(generator), block_index(block_index), block(block) {
+			}
+
+			void ExecuteTask() override {
+				block = generator.PrepareForumBlock(block_index);
+				auto slice_count = block.slice_states.size() - 1;
+				for (idx_t slice_index = 0; slice_index < slice_count; slice_index++) {
+					executor.ScheduleTask(make_uniq<LdbcForumSliceTask>(executor, generator, block, slice_index));
+				}
+			}
+
+			string TaskType() const override {
+				return "LdbcForumPrepareTask";
+			}
+
+		private:
+			const Impl &generator;
+			idx_t block_index;
+			PreparedForumBlock &block;
+		};
+
+		TaskExecutor executor(*context);
+		for (idx_t block_index = 0; block_index < prepared_blocks.size(); block_index++) {
+			executor.ScheduleTask(make_uniq<LdbcForumPrepareTask>(executor, *this, first_block + block_index,
+			                                                      prepared_blocks[block_index]));
+		}
+		executor.WorkOnTasks();
+
+		for (idx_t block_index = 0; block_index < prepared_blocks.size(); block_index++) {
+			generated_blocks[block_index] = FinishForumBlock(prepared_blocks[block_index]);
+		}
+	}
+
+	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks) {
 		class LdbcForumBlockTask : public BaseExecutorTask {
 		public:
 			LdbcForumBlockTask(TaskExecutor &executor, const Impl &generator, idx_t first_block,
-			                   vector<BlockState> &generated_blocks, std::atomic<idx_t> &next_block,
-			                   idx_t slice_threads_per_block)
+			                   vector<BlockState> &generated_blocks, std::atomic<idx_t> &next_block)
 			    : BaseExecutorTask(executor), generator(generator), first_block(first_block),
-			      generated_blocks(generated_blocks), next_block(next_block),
-			      slice_threads_per_block(slice_threads_per_block) {
+			      generated_blocks(generated_blocks), next_block(next_block) {
 			}
 
 			void ExecuteTask() override {
@@ -2278,8 +2313,7 @@ struct LdbcForumGenerator::Impl {
 					if (local_block >= generated_blocks.size()) {
 						break;
 					}
-					generated_blocks[local_block] =
-					    generator.GenerateBlock(first_block + local_block, slice_threads_per_block);
+					generated_blocks[local_block] = generator.GenerateBlock(first_block + local_block);
 				}
 			}
 
@@ -2292,15 +2326,14 @@ struct LdbcForumGenerator::Impl {
 			idx_t first_block;
 			vector<BlockState> &generated_blocks;
 			std::atomic<idx_t> &next_block;
-			idx_t slice_threads_per_block;
 		};
 
 		std::atomic<idx_t> next_block(0);
 		TaskExecutor executor(*context);
 		auto worker_count = MinValue<idx_t>(threads, generated_blocks.size());
 		for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
-			executor.ScheduleTask(make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks,
-			                                                    next_block, slice_threads_per_block));
+			executor.ScheduleTask(
+			    make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks, next_block));
 		}
 		executor.WorkOnTasks();
 	}
@@ -2438,6 +2471,9 @@ struct LdbcForumGenerator::Impl {
 	vector<const LdbcPersonCore *> random_ranked_persons;
 	vector<LdbcForum> forums;
 	idx_t processed_persons = 0;
+	mutable std::atomic<idx_t> replayed_persons {0};
+	mutable std::mutex progress_lock;
+	mutable idx_t reported_persons = 0;
 	idx_t block_start = 0;
 	idx_t block_id = 0;
 	idx_t block_position = 0;

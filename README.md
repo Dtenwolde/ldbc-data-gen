@@ -90,9 +90,9 @@ An SF100 BI Parquet dataset completes with the default DuckDB thread count on a 
 
 | SF | Threads | Wall time | Peak RSS | Output | Parquet files |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 18 (default) | 2:44.89 | 10.2 GiB | 20 GiB | 9,517 |
+| 100 | 18 (default) | 2:42.96 | 10.3 GiB | 20 GiB | 9,517 |
 
-This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `7eb741b`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. Every generated Parquet footer was read successfully after the run. See [the performance notes](docs/performance.md) for the exact command, measurement details, and historical results.
+This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `fc7876a`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. Every generated Parquet footer was read successfully after the run. See [the performance notes](docs/performance.md) for the exact command, measurement details, and historical results.
 
 ## BI Queries
 
