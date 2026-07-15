@@ -38,6 +38,7 @@ static int64_t RandomDateUnchecked(LdbcJavaRandom &random, int64_t min_date, int
 }
 
 static constexpr idx_t LDBC_FORUM_SLICE_SIZE = 500;
+static constexpr uint64_t LDBC_PERSON_ID_MASK = ~(0xFFFFFFFFFFFFFFFFULL << 41U);
 
 static thread_local bool ldbc_discard_generated_text = false;
 
@@ -248,10 +249,9 @@ void LdbcPersonGenerator::ResetBlock(int64_t block_id) {
 }
 
 int64_t LdbcPersonGenerator::ComposePersonId(int64_t sequential_id, int64_t creation_date) const {
-	const uint64_t id_mask = ~(0xFFFFFFFFFFFFFFFFULL << 41U);
 	auto bucket = static_cast<int64_t>(256.0 * static_cast<double>(creation_date - dates.SimulationStart()) /
 	                                   static_cast<double>(dates.SimulationEnd()));
-	return (bucket << 41U) | static_cast<int64_t>(static_cast<uint64_t>(sequential_id) & id_mask);
+	return (bucket << 41U) | static_cast<int64_t>(static_cast<uint64_t>(sequential_id) & LDBC_PERSON_ID_MASK);
 }
 
 LdbcPersonCore LdbcPersonGenerator::GenerateCore(int64_t sequential_id) {
@@ -755,6 +755,39 @@ struct LdbcActivityFriend {
 	const LdbcPersonCore *person;
 	int64_t creation_date;
 	int64_t deletion_date;
+};
+
+class LdbcActivityFriendView {
+public:
+	LdbcActivityFriendView() : entries(nullptr), count(0) {
+	}
+
+	LdbcActivityFriendView(const LdbcActivityFriend *entries_p, idx_t count_p) : entries(entries_p), count(count_p) {
+	}
+
+	const LdbcActivityFriend *begin() const {
+		return entries;
+	}
+
+	const LdbcActivityFriend *end() const {
+		return entries ? entries + count : entries;
+	}
+
+	bool empty() const {
+		return count == 0;
+	}
+
+	idx_t size() const {
+		return count;
+	}
+
+	const LdbcActivityFriend &operator[](idx_t index) const {
+		return entries[index];
+	}
+
+private:
+	const LdbcActivityFriend *entries;
+	idx_t count;
 };
 
 struct LdbcActivityMembership {
@@ -1610,7 +1643,7 @@ static void ConsumePhotos(const LdbcDatagenConfig &config, const LdbcDateGenerat
 
 static LdbcForum CreateWallForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
                                  LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
-                                 const vector<LdbcActivityFriend> &friends, int64_t local_forum_id, int64_t block_id) {
+                                 LdbcActivityFriendView friends, int64_t local_forum_id, int64_t block_id) {
 	LdbcForum forum;
 	forum.creation_date = person.creation_date + config.delta;
 	forum.deletion_date = person.deletion_date;
@@ -1637,7 +1670,7 @@ static LdbcForum CreateWallForum(const LdbcDatagenConfig &config, const LdbcDate
 static bool CreateGroupForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
                              const LdbcPersonDictionaries &dictionaries, LdbcRandomGeneratorFarm &random_farm,
                              const LdbcPersonCore &moderator, const vector<const LdbcPersonCore *> &block,
-                             const vector<LdbcActivityFriend> &friends, int64_t local_forum_id, int64_t block_id,
+                             LdbcActivityFriendView friends, int64_t local_forum_id, int64_t block_id,
                              LdbcForum &forum) {
 	auto min_creation = moderator.creation_date + config.delta;
 	auto max_creation = std::min(moderator.deletion_date, dates.SimulationEnd());
@@ -1735,8 +1768,8 @@ static bool CreateGroupForum(const LdbcDatagenConfig &config, const LdbcDateGene
 
 static bool CreateAlbumForum(const LdbcDatagenConfig &config, const LdbcDateGenerator &dates,
                              const LdbcPersonDictionaries &dictionaries, LdbcRandomGeneratorFarm &random_farm,
-                             const LdbcPersonCore &person, const vector<LdbcActivityFriend> &friends,
-                             int64_t local_forum_id, int32_t album_number, int64_t block_id, LdbcForum &forum) {
+                             const LdbcPersonCore &person, LdbcActivityFriendView friends, int64_t local_forum_id,
+                             int32_t album_number, int64_t block_id, LdbcForum &forum) {
 	auto min_creation = person.creation_date + config.delta;
 	auto max_creation = std::min(person.deletion_date, dates.SimulationEnd());
 	if (max_creation <= min_creation) {
@@ -1806,30 +1839,7 @@ struct LdbcForumGenerator::Impl {
 	      flashmobs(config, dates, dictionaries), flashmob_dates(config.resource_dir),
 	      delete_distribution(config.resource_dir),
 	      popular_places(LdbcResourcePath(config.resource_dir, "dictionaries"), dictionaries.places) {
-		{
-			for (auto &person : persons) {
-				persons_by_id[person.account_id] = &person;
-			}
-		}
-		{
-			for (auto &edge : knows_edges_p) {
-				auto left = persons_by_id.find(edge.person1_id);
-				auto right = persons_by_id.find(edge.person2_id);
-				if (left == persons_by_id.end() || right == persons_by_id.end()) {
-					continue;
-				}
-				friends_by_person[edge.person1_id].push_back({right->second, edge.creation_date, edge.deletion_date});
-				friends_by_person[edge.person2_id].push_back({left->second, edge.creation_date, edge.deletion_date});
-			}
-		}
-		{
-			for (auto &entry : friends_by_person) {
-				std::sort(entry.second.begin(), entry.second.end(),
-				          [](const LdbcActivityFriend &left, const LdbcActivityFriend &right) {
-					          return left.person->account_id < right.person->account_id;
-				          });
-			}
-		}
+		InitializeFriendships(knows_edges_p);
 		{
 			random_ranked_persons.reserve(persons.size());
 			for (auto &person : persons) {
@@ -1842,6 +1852,69 @@ struct LdbcForumGenerator::Impl {
 				          }
 				          return left->account_id < right->account_id;
 			          });
+		}
+	}
+
+	idx_t FindPersonIndex(int64_t account_id) const {
+		auto person_index = static_cast<idx_t>(static_cast<uint64_t>(account_id) & LDBC_PERSON_ID_MASK);
+		if (person_index >= persons.size() || persons[person_index].account_id != account_id) {
+			return persons.size();
+		}
+		return person_index;
+	}
+
+	const LdbcPersonCore *FindPerson(int64_t account_id) const {
+		auto person_index = FindPersonIndex(account_id);
+		return person_index == persons.size() ? nullptr : &persons[person_index];
+	}
+
+	LdbcActivityFriendView FriendsForPerson(const LdbcPersonCore &person) const {
+		auto person_index = FindPersonIndex(person.account_id);
+		if (person_index == persons.size()) {
+			return {};
+		}
+		auto offset = friend_offsets[person_index];
+		auto count = friend_offsets[person_index + 1] - offset;
+		auto entries = friend_entries.empty() ? nullptr : friend_entries.data() + offset;
+		return {entries, count};
+	}
+
+	void InitializeFriendships(const vector<LdbcKnowsEdge> &knows_edges) {
+		friend_offsets.assign(persons.size() + 1, 0);
+		for (auto &edge : knows_edges) {
+			auto left = FindPersonIndex(edge.person1_id);
+			auto right = FindPersonIndex(edge.person2_id);
+			if (left == persons.size() || right == persons.size()) {
+				continue;
+			}
+			friend_offsets[left + 1]++;
+			friend_offsets[right + 1]++;
+		}
+		for (idx_t person_index = 1; person_index < friend_offsets.size(); person_index++) {
+			friend_offsets[person_index] += friend_offsets[person_index - 1];
+		}
+
+		friend_entries.resize(friend_offsets.back());
+		auto write_offsets = friend_offsets;
+		for (auto &edge : knows_edges) {
+			auto left = FindPersonIndex(edge.person1_id);
+			auto right = FindPersonIndex(edge.person2_id);
+			if (left == persons.size() || right == persons.size()) {
+				continue;
+			}
+			friend_entries[write_offsets[left]++] = {&persons[right], edge.creation_date, edge.deletion_date};
+			friend_entries[write_offsets[right]++] = {&persons[left], edge.creation_date, edge.deletion_date};
+		}
+
+		for (idx_t person_index = 0; person_index < persons.size(); person_index++) {
+			if (friend_offsets[person_index + 1] - friend_offsets[person_index] < 2) {
+				continue;
+			}
+			auto begin = friend_entries.data() + friend_offsets[person_index];
+			auto end = friend_entries.data() + friend_offsets[person_index + 1];
+			std::sort(begin, end, [](const LdbcActivityFriend &left, const LdbcActivityFriend &right) {
+				return left.person->account_id < right.person->account_id;
+			});
 		}
 	}
 
@@ -2236,9 +2309,7 @@ struct LdbcForumGenerator::Impl {
 	                   LdbcRandomGeneratorFarm &current_random_farm, idx_t current_block_id,
 	                   int64_t &current_local_forum_id, int64_t &current_local_message_id,
 	                   vector<LdbcForum> &output_forums) const {
-		static const vector<LdbcActivityFriend> EMPTY_FRIENDS;
-		auto friends_entry = friends_by_person.find(person.account_id);
-		auto &friends = friends_entry == friends_by_person.end() ? EMPTY_FRIENDS : friends_entry->second;
+		auto friends = FriendsForPerson(person);
 		if (person.deletion_date - person.creation_date + config.delta >= 0) {
 			LdbcForum wall;
 			{
@@ -2249,10 +2320,9 @@ struct LdbcForumGenerator::Impl {
 			    {&person, wall.creation_date + config.delta, wall.deletion_date}};
 			vector<LdbcActivityMembership> wall_forum_memberships;
 			for (auto &membership : wall.memberships) {
-				auto member = persons_by_id.find(membership.person_id);
-				if (member != persons_by_id.end()) {
-					wall_forum_memberships.push_back(
-					    {member->second, membership.creation_date, membership.deletion_date});
+				auto member = FindPerson(membership.person_id);
+				if (member) {
+					wall_forum_memberships.push_back({member, membership.creation_date, membership.deletion_date});
 				}
 			}
 			auto uniform_posts = NumPostsPerForum(config, dates, current_random_farm, wall,
@@ -2291,10 +2361,9 @@ struct LdbcForumGenerator::Impl {
 			if (created_group) {
 				vector<LdbcActivityMembership> group_post_memberships;
 				for (auto &membership : forum.memberships) {
-					auto member = persons_by_id.find(membership.person_id);
-					if (member != persons_by_id.end()) {
-						group_post_memberships.push_back(
-						    {member->second, membership.creation_date, membership.deletion_date});
+					auto member = FindPerson(membership.person_id);
+					if (member) {
+						group_post_memberships.push_back({member, membership.creation_date, membership.deletion_date});
 					}
 				}
 				auto uniform_posts = NumPostsPerForum(config, dates, current_random_farm, forum,
@@ -2332,10 +2401,9 @@ struct LdbcForumGenerator::Impl {
 			if (created_album) {
 				vector<LdbcActivityMembership> album_memberships;
 				for (auto &membership : forum.memberships) {
-					auto member = persons_by_id.find(membership.person_id);
-					if (member != persons_by_id.end()) {
-						album_memberships.push_back(
-						    {member->second, membership.creation_date, membership.deletion_date});
+					auto member = FindPerson(membership.person_id);
+					if (member) {
+						album_memberships.push_back({member, membership.creation_date, membership.deletion_date});
 					}
 				}
 				auto photo_count =
@@ -2365,8 +2433,8 @@ struct LdbcForumGenerator::Impl {
 	LdbcFlashmobDateDistribution flashmob_dates;
 	LdbcActivityDeleteDistribution delete_distribution;
 	LdbcPopularPlaceDictionary popular_places;
-	unordered_map<int64_t, const LdbcPersonCore *> persons_by_id;
-	unordered_map<int64_t, vector<LdbcActivityFriend>> friends_by_person;
+	vector<idx_t> friend_offsets;
+	vector<LdbcActivityFriend> friend_entries;
 	vector<const LdbcPersonCore *> random_ranked_persons;
 	vector<LdbcForum> forums;
 	idx_t processed_persons = 0;
