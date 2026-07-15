@@ -12,41 +12,106 @@ third_party/ldbc_snb_datagen_spark
 
 The current target is Spark-compatible SNB BI output for the default `composite-merged-fk` layout. The Interactive workload remains out of scope.
 
-## Current API
+## Quick Start
 
-The extension currently registers the north-star table-function contract:
+Build the extension and matching DuckDB shell from the repository root:
+
+```sh
+git submodule update --init --recursive
+make
+```
+
+Open a persistent database with the repository build:
+
+```sh
+build/release/duckdb ldbc.duckdb
+```
+
+Then load the extension and generate a small development dataset:
 
 ```sql
 LOAD ldbc_data_gen;
 
 CALL ldbcgen(
-    sf := 1.0,
-    target := 'tables',
-    schema := 'main',
-    format := 'parquet',
-    threads := 4,
-    overwrite := false,
-    primary_keys := false,
-    dictionary_dir := 'third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries'
+    sf := 0.003,
+    schema := 'ldbc',
+    overwrite := true
+);
+
+SELECT count(*) AS persons
+FROM ldbc.Person;
+```
+
+The repository's DuckDB binary has the extension statically available, so `LOAD ldbc_data_gen` is sufficient. To use another compatible DuckDB build, start its shell with `-unsigned` and load the compiled extension explicitly:
+
+```sh
+duckdb -unsigned ldbc.duckdb
+```
+
+```sql
+LOAD '/absolute/path/to/ldbc-data-gen/build/release/extension/ldbc_data_gen/ldbc_data_gen.duckdb_extension';
+```
+
+DuckDB extensions are version- and platform-specific. Using `build/release/duckdb`, built from the pinned DuckDB submodule alongside the extension, avoids compatibility problems.
+
+Run these examples from the repository root. The default dictionary path is relative to the process working directory; pass an absolute `dictionary_dir` when running elsewhere.
+
+## Generating DuckDB Tables
+
+Table output is the default. This creates the BI relations in the `ldbc` schema of the current database:
+
+```sql
+CALL ldbcgen(
+    sf := 1,
+    schema := 'ldbc',
+    overwrite := true
 );
 ```
 
-The current implementation validates parameters and generates the BI initial snapshot relations plus BI insert and delete batches either as DuckDB tables or as files.
+The generator creates the 18 BI initial-snapshot tables using their BI relation names. Dynamic updates use `inserts_<relation>` and `deletes_<relation>` table names with lowercase relation suffixes, for example `inserts_post` and `deletes_person_likes_comment`.
 
-`ldbcgen` accepts the following named parameters:
+Primary-key constraints are disabled by default because building them adds noticeable load time. Set `primary_keys := true` when the constraints are useful for the intended workload. If the destination already exists, generation fails unless `overwrite := true` is supplied.
+
+Supported scale factors are `0.003`, `0.1`, `0.3`, `1`, `3`, `10`, `30`, `100`, `300`, `1000`, `3000`, `10000`, and `30000`. Scale factor `0.003` is intended for quick development and validation runs.
+
+By default, generation uses DuckDB's configured thread count. Set DuckDB's global `threads` setting or pass `threads := N` to `ldbcgen` to cap generator parallelism.
+
+## Generating Spark-Compatible Files
+
+Set `target := 'files'` and provide an output directory:
+
+```sql
+CALL ldbcgen(
+    sf := 1,
+    target := 'files',
+    output_dir := 'out/sf1',
+    format := 'parquet',
+    overwrite := true
+);
+```
+
+This writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Supported formats are `parquet` and `csv`; CSV output includes a header row.
+
+Parquet snapshots are streamed directly to numbered part files for generated person/forum relations. Other relations and CSV output pass through a UUID-named temporary disk-backed DuckDB database that is removed on success or failure. Large generations therefore need temporary disk headroom in addition to the final output size. A returned `path` can identify either one file or a relation directory containing part files.
+
+Generated data should stay out of git. The repository ignores `out/`, `generated/`, and `reference_data/`.
+
+## API Reference
+
+`ldbcgen` generates the BI initial snapshot plus BI insert and delete batches as DuckDB tables or Spark-compatible files. It accepts only named parameters:
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `sf` | `1.0` | Scale factor; must be greater than zero |
+| `sf` | `1.0` | Supported scale factor listed above |
 | `catalog` | Current catalog | Catalog used for table output |
-| `output_dir` | Empty | Required destination when `target := 'files'` |
+| `output_dir` | Empty | Required destination when `target := 'files'`; relative paths use the process working directory |
 | `target` | `'tables'` | Generate DuckDB `tables` or Spark-compatible `files` |
 | `schema` | Current schema | Schema used for table output |
-| `format` | `'parquet'` | File format: `parquet` or `csv` |
-| `dictionary_dir` | Pinned Spark dictionary directory | Source dictionaries |
+| `format` | `'parquet'` | File format for `target := 'files'`: `parquet` or `csv` |
+| `dictionary_dir` | Pinned Spark dictionary directory | Source dictionaries; relative paths use the process working directory |
 | `threads` | DuckDB thread count | Generator worker count; must be greater than zero |
-| `overwrite` | `false` | Replace existing tables or files |
-| `primary_keys` | `false` | Add primary-key constraints to generated DuckDB tables |
+| `overwrite` | `false` | Replace an existing table or file destination |
+| `primary_keys` | `false` | Add primary-key constraints to generated DuckDB tables; ignored for file output |
 
 Returned columns:
 
@@ -55,24 +120,9 @@ Returned columns:
 | `relation_name` | `VARCHAR` | Generated relation or logical artifact name |
 | `path` | `VARCHAR` | Qualified table name, or output file/directory path |
 | `row_count` | `BIGINT` | Generated row count |
-| `checksum` | `VARCHAR` | Stable content checksum, nullable while planning |
+| `checksum` | `VARCHAR` | Reserved for checksum reporting; currently `NULL` |
 | `format` | `VARCHAR` | `table`, `parquet`, or `csv` |
 | `status` | `VARCHAR` | `created` or `recreated` |
-
-The default generation target is in-database DuckDB tables. It creates the 18 BI initial snapshot relations using their BI relation names, and dynamic update relations using `inserts_<relation>` and `deletes_<relation>` table names with lowercase relation suffixes, for example `inserts_post` and `deletes_person_likes_comment`.
-
-File output is explicit:
-
-```sql
-CALL ldbcgen(
-    sf := 1.0,
-    target := 'files',
-    output_dir := 'out/sf1',
-    format := 'parquet'
-);
-```
-
-File output writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Parquet snapshots are streamed directly to numbered part files for the generated person/forum relations; other relations and CSV output are copied from staging tables. Staging uses a UUID-named temporary disk-backed DuckDB database that is removed on success or failure. Its buffer budget is derived from DuckDB's memory limit, so large generations require temporary disk headroom alongside the final output. Consequently, a returned `path` can identify either a single file or a relation directory containing part files. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing output.
 
 Schema-only metadata is available through:
 
@@ -83,6 +133,14 @@ ORDER BY relation_name, operation, column_index;
 ```
 
 This returns one row per BI column, including `relation_name`, `entity_path`, `kind`, `operation`, `snapshot_path`, `column_index`, `column_name`, `logical_type`, `nullable`, and `primary_key`. `operation` is one of `initial_snapshot`, `inserts`, or `deletes`.
+
+Inspect the resolved generator configuration for a scale factor with:
+
+```sql
+SELECT parameter, value, logical_type, source
+FROM ldbcgen_config(sf := 1)
+ORDER BY parameter;
+```
 
 ## Performance
 
@@ -97,12 +155,12 @@ This local release-build result was measured on an 18-core Apple M5 Max with Duc
 ## BI Queries
 
 The extension includes all 20 LDBC SNB BI queries. They can be run with a
-TPC-H-style pragma against any schema produced by `ldbcgen`:
+TPC-H-style pragma against a table-output schema produced by `ldbcgen`:
 
 ```sql
 PRAGMA ldbc_bi(
     1,
-    schema = 'main',
+    schema = 'ldbc',
     datetime = TIMESTAMP '2011-12-01 00:00:00'
 );
 ```
@@ -158,8 +216,6 @@ python3 tools/validate_ldbc_fixture.py test/fixtures/ldbc_snb_bi_static_schema.j
 ```
 
 This check is Spark-free and CI-safe. It validates the pinned upstream commit metadata, relation inventory shape, primary keys, initial snapshot paths, and column definitions.
-
-Generated data should stay out of git. Use ignored directories such as `out/`, `generated/`, or `reference_data/`.
 
 Generate static DuckDB parity checksums:
 
@@ -229,18 +285,11 @@ The fixture was produced independently with PostgreSQL over the official
 Spark SF1 `composite-merged-fk` dataset. See [the parity notes](docs/parity.md#sf1-bi-query-result-oracle)
 for provenance, coverage, and regeneration instructions.
 
-## Building And Testing
+## Development
 
-Initialize submodules:
-
-```sh
-git submodule update --init --recursive
-```
-
-Build and test the extension:
+After completing the quick-start build, run the tests and formatting check with:
 
 ```sh
-make
 make test
 make format-check
 ```
