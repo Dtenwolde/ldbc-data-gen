@@ -1,23 +1,14 @@
-# Extension updating 
-When cloning this template, the target version of DuckDB should be the latest stable release of DuckDB. However, there 
-will inevitably come a time when a new DuckDB is released and the extension repository needs updating. This process goes
-as follows:
+# Updating DuckDB
 
-- Bump submodules
-  - `./duckdb` should be set to latest tagged release
-  - `./extension-ci-tools` should be set to updated branch corresponding to latest DuckDB release. So if you're building for DuckDB `v1.1.0` there will be a branch in `extension-ci-tools` named `v1.1.0` to which you should check out. 
-- Bump versions in `./github/workflows`
-  - `duckdb_version` input in `duckdb-stable-build` job in `MainDistributionPipeline.yml` should be set to latest tagged release
-  - `duckdb_version` input in `duckdb-stable-deploy` job in `MainDistributionPipeline.yml` should be set to latest tagged release
-  - the reusable workflow `duckdb/extension-ci-tools/.github/workflows/_extension_distribution.yml` for the `duckdb-stable-build` job should be set to latest tagged release
+This extension uses DuckDB's internal C++ API, which is not stable across commits. The main CI workflow therefore builds against an explicit DuckDB commit rather than the moving `main` branch.
 
-# API changes
-DuckDB extensions built with this extension template are built against the internal C++ API of DuckDB. This API is not guaranteed to be stable.
-What this means for extension development is that when updating your extensions DuckDB target version using the above steps, you may run into the fact that your extension no longer builds properly.
+To update DuckDB:
 
-Currently, DuckDB does not (yet) provide a specific change log for these API changes, but it is generally not too hard to figure out what has changed.
+1. Choose and test a DuckDB commit deliberately.
+2. Update the `duckdb` submodule to that commit.
+3. Put the same full commit SHA in `.github/duckdb-version`. The submodule and CI pin must stay aligned.
+4. Update `extension-ci-tools` only when its workflow or build contract requires it. Main CI currently consumes its `main` workflows.
+5. Build and run `make test` and `make format-check` locally.
+6. Run the SF1 checksum and BI-query parity command from the root README before merging.
 
-For figuring out how and why the C++ API changed, we recommend using the following resources:
-- DuckDB's [Release Notes](https://github.com/duckdb/duckdb/releases)
-- DuckDB's history of [Core extension patches](https://github.com/duckdb/duckdb/commits/main/.github/patches/extensions)
-- The git history of the relevant C++ Header file of the API that has changed
+Treat deprecation warnings as advance notice, but do not adopt a replacement API until the pinned DuckDB commit supports it and parity still passes. Useful upstream references are DuckDB's [release notes](https://github.com/duckdb/duckdb/releases), [core-extension patches](https://github.com/duckdb/duckdb/commits/main/.github/patches/extensions), and the history of the affected header.

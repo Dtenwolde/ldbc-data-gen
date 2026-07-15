@@ -8,13 +8,9 @@
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <exception>
 #include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <map>
 #include <mutex>
 #include <set>
@@ -41,60 +37,7 @@ static int64_t RandomDateUnchecked(LdbcJavaRandom &random, int64_t min_date, int
 	return static_cast<int64_t>(offset + static_cast<double>(min_date));
 }
 
-static bool LdbcPersonProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_PROFILE") != nullptr;
-	return enabled;
-}
-
-static double LdbcPersonProfileNowMs() {
-	using clock = std::chrono::steady_clock;
-	auto now = clock::now().time_since_epoch();
-	return static_cast<double>(std::chrono::duration_cast<std::chrono::microseconds>(now).count()) / 1000.0;
-}
-
-static bool LdbcForumBlockProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_FORUM_BLOCK_PROFILE") != nullptr;
-	return enabled;
-}
-
-static idx_t LdbcForumSliceSize() {
-	static idx_t slice_size = []() {
-		auto value = std::getenv("LDBCGEN_FORUM_SLICE_SIZE");
-		if (!value) {
-			return idx_t(500);
-		}
-		auto parsed = std::strtoull(value, nullptr, 10);
-		return NumericCast<idx_t>(parsed);
-	}();
-	return slice_size;
-}
-
-static bool LdbcForumSlicePrepassEnabled() {
-	static bool enabled = []() {
-		auto value = std::getenv("LDBCGEN_FORUM_SLICE_PREPASS");
-		return !value || string(value) != "0";
-	}();
-	return enabled;
-}
-
-static bool LdbcForumSliceReplayEnabled() {
-	static bool enabled = []() {
-		auto value = std::getenv("LDBCGEN_FORUM_SLICE_REPLAY");
-		return !value || string(value) != "0";
-	}();
-	return enabled;
-}
-
-static idx_t LdbcForumMaxBlocksInFlight() {
-	static idx_t max_blocks = []() {
-		auto value = std::getenv("LDBCGEN_MAX_FORUM_BLOCKS_IN_FLIGHT");
-		if (!value) {
-			return idx_t(0);
-		}
-		return NumericCast<idx_t>(std::strtoull(value, nullptr, 10));
-	}();
-	return max_blocks;
-}
+static constexpr idx_t LDBC_FORUM_SLICE_SIZE = 500;
 
 static thread_local bool ldbc_discard_generated_text = false;
 
@@ -110,26 +53,6 @@ public:
 
 private:
 	bool previous;
-};
-
-class LdbcScopedProfileAccumulator {
-public:
-	explicit LdbcScopedProfileAccumulator(double &target) : target(target), enabled(LdbcPersonProfileEnabled()) {
-		if (enabled) {
-			start = LdbcPersonProfileNowMs();
-		}
-	}
-
-	~LdbcScopedProfileAccumulator() {
-		if (enabled) {
-			target += LdbcPersonProfileNowMs() - start;
-		}
-	}
-
-private:
-	double &target;
-	bool enabled;
-	double start = 0;
 };
 
 } // namespace
@@ -865,132 +788,6 @@ static constexpr const char *LDBC_SHORT_COMMENTS[] = {"ok",  "good",   "great", 
                                                       "LOL", "roflol", "no way!", "I see", "right", "yes",
                                                       "no",  "duh",    "thanks",  "maybe"};
 
-struct LdbcForumGenerationProfile {
-	double init_dictionaries_ms = 0.0;
-	double build_person_index_ms = 0.0;
-	double build_friend_index_ms = 0.0;
-	double sort_friend_index_ms = 0.0;
-	double rank_persons_ms = 0.0;
-	double block_sort_ms = 0.0;
-	double create_wall_ms = 0.0;
-	double wall_uniform_posts_ms = 0.0;
-	double wall_flashmob_posts_ms = 0.0;
-	double create_group_ms = 0.0;
-	double group_uniform_posts_ms = 0.0;
-	double group_flashmob_posts_ms = 0.0;
-	double create_album_ms = 0.0;
-	double album_photos_ms = 0.0;
-	double post_text_ms = 0.0;
-	double comment_text_ms = 0.0;
-	double java_string_length_ms = 0.0;
-	double consume_comments_ms = 0.0;
-	double comment_membership_scan_ms = 0.0;
-	double consume_likes_ms = 0.0;
-	double flashmob_build_tags_ms = 0.0;
-	double flashmob_select_tags_ms = 0.0;
-	int64_t wall_forums = 0;
-	int64_t group_forums = 0;
-	int64_t album_forums = 0;
-	int64_t requested_uniform_posts = 0;
-	int64_t requested_flashmob_posts = 0;
-	int64_t requested_photos = 0;
-	int64_t emitted_posts = 0;
-	int64_t emitted_comments = 0;
-	int64_t emitted_post_likes = 0;
-	int64_t emitted_comment_likes = 0;
-	int64_t memberships = 0;
-};
-
-static thread_local LdbcForumGenerationProfile *ldbc_forum_profile = nullptr;
-
-static void MergeForumGenerationProfile(LdbcForumGenerationProfile &target, const LdbcForumGenerationProfile &source) {
-	target.init_dictionaries_ms += source.init_dictionaries_ms;
-	target.build_person_index_ms += source.build_person_index_ms;
-	target.build_friend_index_ms += source.build_friend_index_ms;
-	target.sort_friend_index_ms += source.sort_friend_index_ms;
-	target.rank_persons_ms += source.rank_persons_ms;
-	target.block_sort_ms += source.block_sort_ms;
-	target.create_wall_ms += source.create_wall_ms;
-	target.wall_uniform_posts_ms += source.wall_uniform_posts_ms;
-	target.wall_flashmob_posts_ms += source.wall_flashmob_posts_ms;
-	target.create_group_ms += source.create_group_ms;
-	target.group_uniform_posts_ms += source.group_uniform_posts_ms;
-	target.group_flashmob_posts_ms += source.group_flashmob_posts_ms;
-	target.create_album_ms += source.create_album_ms;
-	target.album_photos_ms += source.album_photos_ms;
-	target.post_text_ms += source.post_text_ms;
-	target.comment_text_ms += source.comment_text_ms;
-	target.java_string_length_ms += source.java_string_length_ms;
-	target.consume_comments_ms += source.consume_comments_ms;
-	target.comment_membership_scan_ms += source.comment_membership_scan_ms;
-	target.consume_likes_ms += source.consume_likes_ms;
-	target.flashmob_build_tags_ms += source.flashmob_build_tags_ms;
-	target.flashmob_select_tags_ms += source.flashmob_select_tags_ms;
-	target.wall_forums += source.wall_forums;
-	target.group_forums += source.group_forums;
-	target.album_forums += source.album_forums;
-	target.requested_uniform_posts += source.requested_uniform_posts;
-	target.requested_flashmob_posts += source.requested_flashmob_posts;
-	target.requested_photos += source.requested_photos;
-	target.emitted_posts += source.emitted_posts;
-	target.emitted_comments += source.emitted_comments;
-	target.emitted_post_likes += source.emitted_post_likes;
-	target.emitted_comment_likes += source.emitted_comment_likes;
-	target.memberships += source.memberships;
-}
-
-class LdbcForumProfileScope {
-public:
-	explicit LdbcForumProfileScope(LdbcForumGenerationProfile &profile) : previous(ldbc_forum_profile) {
-		if (LdbcPersonProfileEnabled()) {
-			ldbc_forum_profile = &profile;
-		}
-	}
-
-	~LdbcForumProfileScope() {
-		ldbc_forum_profile = previous;
-	}
-
-private:
-	LdbcForumGenerationProfile *previous;
-};
-
-static void PrintForumGenerationProfile(const LdbcForumGenerationProfile &profile) {
-	if (!LdbcPersonProfileEnabled()) {
-		return;
-	}
-	std::cerr << "[ldbcgen] generate.forums.init_dictionaries: " << profile.init_dictionaries_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.build_person_index: " << profile.build_person_index_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.build_friend_index: " << profile.build_friend_index_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.sort_friend_index: " << profile.sort_friend_index_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.rank_persons: " << profile.rank_persons_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.block_sort: " << profile.block_sort_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.create_wall: " << profile.create_wall_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.wall_uniform_posts: " << profile.wall_uniform_posts_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.wall_flashmob_posts: " << profile.wall_flashmob_posts_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.create_group: " << profile.create_group_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.group_uniform_posts: " << profile.group_uniform_posts_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.group_flashmob_posts: " << profile.group_flashmob_posts_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.create_album: " << profile.create_album_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.album_photos: " << profile.album_photos_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.post_text: " << profile.post_text_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.comment_text: " << profile.comment_text_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.java_string_length: " << profile.java_string_length_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.consume_comments: " << profile.consume_comments_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.comment_membership_scan: " << profile.comment_membership_scan_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.consume_likes: " << profile.consume_likes_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.flashmob_build_tags: " << profile.flashmob_build_tags_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.flashmob_select_tags: " << profile.flashmob_select_tags_ms << " ms\n";
-	std::cerr << "[ldbcgen] generate.forums.counts: walls=" << profile.wall_forums << " groups=" << profile.group_forums
-	          << " albums=" << profile.album_forums << " requested_uniform_posts=" << profile.requested_uniform_posts
-	          << " requested_flashmob_posts=" << profile.requested_flashmob_posts
-	          << " requested_photos=" << profile.requested_photos << " emitted_posts=" << profile.emitted_posts
-	          << " emitted_comments=" << profile.emitted_comments
-	          << " emitted_post_likes=" << profile.emitted_post_likes
-	          << " emitted_comment_likes=" << profile.emitted_comment_likes << " memberships=" << profile.memberships
-	          << "\n";
-}
-
 static int64_t NumberOfMonths(const LdbcDateGenerator &dates, int64_t from_date) {
 	return (dates.SimulationEnd() - from_date) / (30LL * LdbcDateGenerator::ONE_DAY_MS);
 }
@@ -1071,10 +868,6 @@ static int32_t GeneratePostBrowser(const LdbcDatagenConfig &config, const LdbcPe
 static LdbcGeneratedText GeneratePostText(const LdbcDatagenConfig &config, const LdbcPersonDictionaries &dictionaries,
                                           LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
                                           const vector<int32_t> &tags) {
-	unique_ptr<LdbcScopedProfileAccumulator> timer;
-	if (ldbc_forum_profile) {
-		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->post_text_ms);
-	}
 	auto &random = random_farm.Get(LdbcRandomAspect::LARGE_TEXT);
 	int32_t text_size;
 	if (person.large_poster && random.NextDouble() > (1.0 - config.ratio_large_post)) {
@@ -1092,10 +885,6 @@ static LdbcGeneratedText GenerateCommentText(const LdbcDatagenConfig &config,
                                              const LdbcPersonDictionaries &dictionaries,
                                              LdbcRandomGeneratorFarm &random_farm, const LdbcPersonCore &person,
                                              const vector<int32_t> &tags) {
-	unique_ptr<LdbcScopedProfileAccumulator> timer;
-	if (ldbc_forum_profile) {
-		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->comment_text_ms);
-	}
 	auto &random = random_farm.Get(LdbcRandomAspect::LARGE_TEXT);
 	int32_t text_size;
 	if (person.large_poster && random.NextDouble() > (1.0 - config.ratio_large_comment)) {
@@ -1178,10 +967,6 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
                          LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                          const vector<LdbcActivityMembership> &memberships, const LdbcActivityMessage &message,
                          bool comment_like) {
-	unique_ptr<LdbcScopedProfileAccumulator> timer;
-	if (ldbc_forum_profile) {
-		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->consume_likes_ms);
-	}
 	auto member_count = NumericCast<int32_t>(memberships.size());
 	auto like_count = std::min<int32_t>(PowerDistributionValue(random_farm.Get(LdbcRandomAspect::NUM_LIKE), 1.0,
 	                                                           static_cast<double>(config.max_num_like), 0.07),
@@ -1224,10 +1009,6 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
                             LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                             const vector<LdbcActivityMembership> &memberships, const LdbcActivityMessage &post,
                             int32_t comment_count, int64_t block_id, int64_t &local_message_id) {
-	unique_ptr<LdbcScopedProfileAccumulator> timer;
-	if (ldbc_forum_profile) {
-		timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->consume_comments_ms);
-	}
 	vector<LdbcActivityMessage> parent_candidates;
 	parent_candidates.reserve(NumericCast<idx_t>(comment_count) + 1);
 	parent_candidates.push_back(post);
@@ -1238,10 +1019,6 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 		vector<LdbcActivityMembership> valid_memberships;
 		valid_memberships.reserve(memberships.size());
 		{
-			unique_ptr<LdbcScopedProfileAccumulator> scan_timer;
-			if (ldbc_forum_profile) {
-				scan_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->comment_membership_scan_ms);
-			}
 			for (auto &membership : memberships) {
 				if ((membership.creation_date < parent.creation_date &&
 				     membership.deletion_date > parent.creation_date) ||
@@ -1690,10 +1467,6 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 		auto comment_count = random_farm.Get(LdbcRandomAspect::NUM_COMMENT).NextInt(config.max_num_comments + 1);
 		for (int32_t post_idx = 0; post_idx < post_count; post_idx++) {
 			if (!flashmob_tags_loaded) {
-				unique_ptr<LdbcScopedProfileAccumulator> build_timer;
-				if (ldbc_forum_profile) {
-					build_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->flashmob_build_tags_ms);
-				}
 				forum_flashmob_tags = BuildForumFlashmobTags(config, flashmobs, random_farm, forum);
 				flashmob_tags_loaded = true;
 			}
@@ -1702,10 +1475,6 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 			}
 			idx_t flashmob_idx;
 			{
-				unique_ptr<LdbcScopedProfileAccumulator> select_timer;
-				if (ldbc_forum_profile) {
-					select_timer = make_uniq<LdbcScopedProfileAccumulator>(ldbc_forum_profile->flashmob_select_tags_ms);
-				}
 				auto earliest_idx =
 				    SearchEarliestForumFlashmobTag(forum_flashmob_tags, membership, FLASHMOB_SPAN, config.delta);
 				if (earliest_idx == DConstants::INVALID_INDEX) {
@@ -2037,20 +1806,12 @@ struct LdbcForumGenerator::Impl {
 	      flashmobs(config, dates, dictionaries), flashmob_dates(config.resource_dir),
 	      delete_distribution(config.resource_dir),
 	      popular_places(LdbcResourcePath(config.resource_dir, "dictionaries"), dictionaries.places) {
-		previous_profile = ldbc_forum_profile;
-		if (LdbcPersonProfileEnabled()) {
-			ldbc_forum_profile = &profile;
-		}
-		profile.init_dictionaries_ms += LdbcPersonProfileNowMs() - profile_start;
-
 		{
-			LdbcScopedProfileAccumulator timer(profile.build_person_index_ms);
 			for (auto &person : persons) {
 				persons_by_id[person.account_id] = &person;
 			}
 		}
 		{
-			LdbcScopedProfileAccumulator timer(profile.build_friend_index_ms);
 			for (auto &edge : knows_edges) {
 				auto left = persons_by_id.find(edge.person1_id);
 				auto right = persons_by_id.find(edge.person2_id);
@@ -2062,7 +1823,6 @@ struct LdbcForumGenerator::Impl {
 			}
 		}
 		{
-			LdbcScopedProfileAccumulator timer(profile.sort_friend_index_ms);
 			for (auto &entry : friends_by_person) {
 				std::sort(entry.second.begin(), entry.second.end(),
 				          [](const LdbcActivityFriend &left, const LdbcActivityFriend &right) {
@@ -2071,7 +1831,6 @@ struct LdbcForumGenerator::Impl {
 			}
 		}
 		{
-			LdbcScopedProfileAccumulator timer(profile.rank_persons_ms);
 			random_ranked_persons.reserve(persons.size());
 			for (auto &person : persons) {
 				random_ranked_persons.push_back(&person);
@@ -2087,9 +1846,7 @@ struct LdbcForumGenerator::Impl {
 	}
 
 	struct ForumSliceState {
-		idx_t block_id = 0;
 		idx_t block_offset = 0;
-		idx_t global_offset = 0;
 		int64_t local_forum_id = 0;
 		int64_t local_message_id = 0;
 		LdbcRandomGeneratorFarm::State random_state;
@@ -2099,38 +1856,20 @@ struct LdbcForumGenerator::Impl {
 		idx_t block_id = 0;
 		idx_t block_start = 0;
 		idx_t block_end = 0;
-		double wall_ms = 0;
-		double slice_snapshot_ms = 0;
-		double slice_prepass_ms = 0;
-		bool has_slice_prepass = false;
-		idx_t forum_count = 0;
 		int64_t slice_prepass_final_local_forum_id = 0;
 		int64_t slice_prepass_final_local_message_id = 0;
 		vector<const LdbcPersonCore *> block;
 		vector<LdbcForum> forums;
-		vector<ForumSliceState> slice_states;
 		LdbcRandomGeneratorFarm random_farm;
 		int64_t local_forum_id = 0;
 		int64_t local_message_id = 0;
-		LdbcForumGenerationProfile profile;
 	};
 
 	struct ForumSliceScanResult {
-		idx_t boundary_count = 0;
-		idx_t forum_count = 0;
-		idx_t post_count = 0;
-		idx_t comment_count = 0;
 		int64_t final_local_forum_id = 0;
 		int64_t final_local_message_id = 0;
-		double wall_ms = 0;
-		double snapshot_ms = 0;
 		vector<ForumSliceState> slice_states;
 	};
-
-	~Impl() {
-		ldbc_forum_profile = previous_profile;
-		PrintForumGenerationProfile(profile);
-	}
 
 	bool GenerateNext(idx_t max_persons) {
 		if (threads > 1 && context) {
@@ -2147,7 +1886,7 @@ struct LdbcForumGenerator::Impl {
 			}
 			vector<LdbcForum> person_forums;
 			ProcessPerson(*block[block_position++], block, random_farm, block_id, local_forum_id, local_message_id,
-			              profile, person_forums);
+			              person_forums);
 			for (auto &forum : person_forums) {
 				Emit(std::move(forum));
 			}
@@ -2181,9 +1920,6 @@ struct LdbcForumGenerator::Impl {
 		if (UseForumSliceReplay()) {
 			max_concurrent_blocks = MaxValue<idx_t>(1, threads / 2);
 		}
-		if (LdbcForumMaxBlocksInFlight() > 0) {
-			max_concurrent_blocks = MinValue<idx_t>(max_concurrent_blocks, LdbcForumMaxBlocksInFlight());
-		}
 		auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, max_concurrent_blocks);
 		vector<BlockState> generated_blocks(blocks_to_generate);
 		auto slice_threads_per_block = MaxValue<idx_t>(1, threads / blocks_to_generate);
@@ -2194,9 +1930,6 @@ struct LdbcForumGenerator::Impl {
 		}
 
 		for (auto &generated_block : generated_blocks) {
-			PrintBlockProfile(generated_block);
-			PrintSliceProfile(generated_block);
-			MergeForumGenerationProfile(profile, generated_block.profile);
 			for (auto &forum : generated_block.forums) {
 				Emit(std::move(forum));
 			}
@@ -2216,59 +1949,19 @@ struct LdbcForumGenerator::Impl {
 		return false;
 	}
 
-	static void PrintBlockProfile(const BlockState &state) {
-		if (!LdbcForumBlockProfileEnabled()) {
-			return;
-		}
-		std::cerr << "[ldbcgen] forum.block." << state.block_id << ": wall=" << std::fixed << std::setprecision(3)
-		          << state.wall_ms << " ms persons=" << (state.block_end - state.block_start)
-		          << " forums=" << state.forum_count << " posts=" << state.profile.emitted_posts
-		          << " comments=" << state.profile.emitted_comments
-		          << " post_likes=" << state.profile.emitted_post_likes
-		          << " comment_likes=" << state.profile.emitted_comment_likes
-		          << " memberships=" << state.profile.memberships << "\n";
-	}
-
-	static void PrintSliceProfile(const BlockState &state) {
-		if (!LdbcForumBlockProfileEnabled()) {
-			return;
-		}
-		std::cerr << "[ldbcgen] forum.slice.block." << state.block_id << ": slice_size=" << LdbcForumSliceSize()
-		          << " boundaries=" << state.slice_states.size() << " snapshot=" << std::fixed << std::setprecision(3)
-		          << state.slice_snapshot_ms << " ms prepass=" << state.slice_prepass_ms
-		          << " ms final_local_forum_id=" << state.local_forum_id
-		          << " final_local_message_id=" << state.local_message_id << "\n";
-	}
-
-	static void PrintSlicePrepassProfile(idx_t block_id, const ForumSliceScanResult &scan) {
-		if (!LdbcForumBlockProfileEnabled()) {
-			return;
-		}
-		std::cerr << "[ldbcgen] forum.slice.prepass.block." << block_id << ": slice_size=" << LdbcForumSliceSize()
-		          << " wall=" << std::fixed << std::setprecision(3) << scan.wall_ms
-		          << " ms snapshot=" << scan.snapshot_ms << " ms boundaries=" << scan.boundary_count
-		          << " forums=" << scan.forum_count << " posts=" << scan.post_count
-		          << " comments=" << scan.comment_count << " final_local_forum_id=" << scan.final_local_forum_id
-		          << " final_local_message_id=" << scan.final_local_message_id << "\n";
-	}
-
-	static void RecordSliceState(vector<ForumSliceState> &slice_states, double &snapshot_ms, idx_t block_id,
-	                             idx_t block_start, idx_t block_offset, const LdbcRandomGeneratorFarm &random_farm,
-	                             int64_t local_forum_id, int64_t local_message_id) {
-		auto start_ms = LdbcPersonProfileNowMs();
+	static void RecordSliceState(vector<ForumSliceState> &slice_states, idx_t block_offset,
+	                             const LdbcRandomGeneratorFarm &random_farm, int64_t local_forum_id,
+	                             int64_t local_message_id) {
 		ForumSliceState state;
-		state.block_id = block_id;
 		state.block_offset = block_offset;
-		state.global_offset = block_start + block_offset;
 		state.local_forum_id = local_forum_id;
 		state.local_message_id = local_message_id;
 		state.random_state = random_farm.Snapshot();
 		slice_states.push_back(std::move(state));
-		snapshot_ms += LdbcPersonProfileNowMs() - start_ms;
 	}
 
 	static bool ShouldRecordSliceBoundary(idx_t block_offset, idx_t block_person_count) {
-		auto slice_size = LdbcForumSliceSize();
+		auto slice_size = LDBC_FORUM_SLICE_SIZE;
 		if (slice_size == 0 || block_offset > block_person_count) {
 			return false;
 		}
@@ -2310,7 +2003,6 @@ struct LdbcForumGenerator::Impl {
 			block.push_back(random_ranked_persons[idx]);
 		}
 		{
-			LdbcScopedProfileAccumulator timer(profile.block_sort_ms);
 			std::sort(block.begin(), block.end(), [](const LdbcPersonCore *left, const LdbcPersonCore *right) {
 				return left->account_id < right->account_id;
 			});
@@ -2329,7 +2021,6 @@ struct LdbcForumGenerator::Impl {
 			state.block.push_back(random_ranked_persons[idx]);
 		}
 		{
-			LdbcScopedProfileAccumulator timer(state.profile.block_sort_ms);
 			std::sort(state.block.begin(), state.block.end(),
 			          [](const LdbcPersonCore *left, const LdbcPersonCore *right) {
 				          return left->account_id < right->account_id;
@@ -2339,79 +2030,52 @@ struct LdbcForumGenerator::Impl {
 	}
 
 	ForumSliceScanResult CollectSliceBoundaries(idx_t block_index) const {
-		auto start_ms = LdbcPersonProfileNowMs();
 		ForumSliceScanResult result;
 		auto state = InitializeBlockState(block_index);
 		auto block_person_count = state.block_end - state.block_start;
 		LdbcDiscardGeneratedTextScope discard_text_scope;
-		LdbcForumProfileScope block_profile_scope(state.profile);
 		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
 			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
-				RecordSliceState(result.slice_states, result.snapshot_ms, state.block_id, state.block_start,
-				                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
+				RecordSliceState(result.slice_states, person_offset, state.random_farm, state.local_forum_id,
+				                 state.local_message_id);
 			}
 			vector<LdbcForum> person_forums;
 			auto person = state.block[person_offset];
 			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-			              state.local_message_id, state.profile, person_forums);
-			result.forum_count += person_forums.size();
-			for (auto &forum : person_forums) {
-				result.post_count += forum.posts.size();
-				result.comment_count += forum.comments.size();
-			}
+			              state.local_message_id, person_forums);
 		}
 		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
-			RecordSliceState(result.slice_states, result.snapshot_ms, state.block_id, state.block_start,
-			                 block_person_count, state.random_farm, state.local_forum_id, state.local_message_id);
+			RecordSliceState(result.slice_states, block_person_count, state.random_farm, state.local_forum_id,
+			                 state.local_message_id);
 		}
-		result.boundary_count = result.slice_states.size();
 		result.final_local_forum_id = state.local_forum_id;
 		result.final_local_message_id = state.local_message_id;
-		result.wall_ms = LdbcPersonProfileNowMs() - start_ms;
 		return result;
 	}
 
 	BlockState GenerateBlock(idx_t block_index, idx_t slice_threads = 1) const {
-		auto start_ms = LdbcForumBlockProfileEnabled() ? LdbcPersonProfileNowMs() : 0;
 		auto state = InitializeBlockState(block_index);
 		vector<ForumSliceState> scan_slice_states;
 		if (UseForumSliceReplay()) {
 			auto scan = CollectSliceBoundaries(block_index);
 			scan_slice_states = std::move(scan.slice_states);
-			state.has_slice_prepass = true;
-			state.slice_prepass_ms = scan.wall_ms;
 			state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
 			state.slice_prepass_final_local_message_id = scan.final_local_message_id;
-			PrintSlicePrepassProfile(block_index, scan);
 		}
-		auto block_person_count = state.block_end - state.block_start;
 		if (UseForumSliceReplay()) {
-			if (!state.has_slice_prepass || scan_slice_states.empty()) {
-				throw InvalidInputException(
-				    "LDBCGEN_FORUM_SLICE_REPLAY requires LDBCGEN_FORUM_SLICE_PREPASS and a non-zero slice size");
+			if (scan_slice_states.empty()) {
+				throw InternalException("Forum slice prepass did not produce replay boundaries");
 			}
 			ReplayForumSlices(state, scan_slice_states, slice_threads);
 		} else {
-			LdbcForumProfileScope block_profile_scope(state.profile);
 			for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
-				if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
-					RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
-					                 person_offset, state.random_farm, state.local_forum_id, state.local_message_id);
-				}
 				auto person = state.block[person_offset];
 				ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-				              state.local_message_id, state.profile, state.forums);
+				              state.local_message_id, state.forums);
 			}
 		}
-		if (!UseForumSliceReplay()) {
-			state.forum_count = state.forums.size();
-		}
-		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
-			RecordSliceState(state.slice_states, state.slice_snapshot_ms, state.block_id, state.block_start,
-			                 block_person_count, state.random_farm, state.local_forum_id, state.local_message_id);
-		}
-		if (state.has_slice_prepass && (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
-		                                state.slice_prepass_final_local_message_id != state.local_message_id)) {
+		if (UseForumSliceReplay() && (state.slice_prepass_final_local_forum_id != state.local_forum_id ||
+		                              state.slice_prepass_final_local_message_id != state.local_message_id)) {
 			throw InternalException("Forum slice prepass diverged for block %llu: prepass ids (%lld, %lld), "
 			                        "generation ids (%lld, %lld)",
 			                        static_cast<unsigned long long>(state.block_id),
@@ -2425,19 +2089,13 @@ struct LdbcForumGenerator::Impl {
 			state.forums.clear();
 			state.forums.shrink_to_fit();
 		}
-		if (LdbcForumBlockProfileEnabled()) {
-			state.wall_ms = LdbcPersonProfileNowMs() - start_ms;
-		}
 		return state;
 	}
 
 	void ReplayForumSlices(BlockState &state, const vector<ForumSliceState> &slice_states, idx_t slice_threads) const {
 		D_ASSERT(slice_states.size() >= 2);
-		state.slice_states = slice_states;
 		struct SliceResult {
 			vector<LdbcForum> forums;
-			LdbcForumGenerationProfile profile;
-			idx_t forum_count = 0;
 		};
 		auto slice_count = slice_states.size() - 1;
 		vector<SliceResult> results(slice_count);
@@ -2460,19 +2118,17 @@ struct LdbcForumGenerator::Impl {
 					auto local_message_id = start.local_message_id;
 					auto &result = results[slice_idx];
 					auto slices_per_block =
-					    (NumericCast<idx_t>(config.block_size) + LdbcForumSliceSize() - 1) / LdbcForumSliceSize();
+					    (NumericCast<idx_t>(config.block_size) + LDBC_FORUM_SLICE_SIZE - 1) / LDBC_FORUM_SLICE_SIZE;
 					auto global_slice_id = state.block_id * slices_per_block + slice_idx;
 					vector<LdbcForum> person_forums;
 					{
-						LdbcForumProfileScope slice_profile_scope(result.profile);
 						for (idx_t person_offset = start.block_offset; person_offset < end.block_offset;
 						     person_offset++) {
 							auto person = state.block[person_offset];
 							auto &output_forums = slice_callback ? person_forums : result.forums;
 							ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id,
-							              local_message_id, result.profile, output_forums);
+							              local_message_id, output_forums);
 							if (slice_callback) {
-								result.forum_count += person_forums.size();
 								slice_callback(global_slice_id, state.block_start + start.block_offset,
 								               state.block_start + end.block_offset, person_forums, false);
 							}
@@ -2489,8 +2145,6 @@ struct LdbcForumGenerator::Impl {
 						vector<LdbcForum> no_forums;
 						slice_callback(global_slice_id, state.block_start + start.block_offset,
 						               state.block_start + end.block_offset, no_forums, true);
-					} else {
-						result.forum_count = result.forums.size();
 					}
 					if (block_callback && !slice_callback) {
 						block_callback(global_slice_id, state.block_start + start.block_offset,
@@ -2521,8 +2175,6 @@ struct LdbcForumGenerator::Impl {
 			std::rethrow_exception(worker_error);
 		}
 		for (auto &result : results) {
-			MergeForumGenerationProfile(state.profile, result.profile);
-			state.forum_count += result.forum_count;
 			for (auto &forum : result.forums) {
 				state.forums.push_back(std::move(forum));
 			}
@@ -2532,8 +2184,7 @@ struct LdbcForumGenerator::Impl {
 	}
 
 	bool UseForumSliceReplay() const {
-		return (block_callback || slice_callback) && threads > 1 && LdbcForumSliceSize() > 0 &&
-		       LdbcForumSlicePrepassEnabled() && LdbcForumSliceReplayEnabled();
+		return (block_callback || slice_callback) && threads > 1;
 	}
 
 	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks,
@@ -2584,14 +2235,13 @@ struct LdbcForumGenerator::Impl {
 	void ProcessPerson(const LdbcPersonCore &person, const vector<const LdbcPersonCore *> &current_block,
 	                   LdbcRandomGeneratorFarm &current_random_farm, idx_t current_block_id,
 	                   int64_t &current_local_forum_id, int64_t &current_local_message_id,
-	                   LdbcForumGenerationProfile &current_profile, vector<LdbcForum> &output_forums) const {
+	                   vector<LdbcForum> &output_forums) const {
 		static const vector<LdbcActivityFriend> EMPTY_FRIENDS;
 		auto friends_entry = friends_by_person.find(person.account_id);
 		auto &friends = friends_entry == friends_by_person.end() ? EMPTY_FRIENDS : friends_entry->second;
 		if (person.deletion_date - person.creation_date + config.delta >= 0) {
 			LdbcForum wall;
 			{
-				LdbcScopedProfileAccumulator timer(current_profile.create_wall_ms);
 				wall = CreateWallForum(config, dates, current_random_farm, person, friends, current_local_forum_id++,
 				                       current_block_id);
 			}
@@ -2609,21 +2259,16 @@ struct LdbcForumGenerator::Impl {
 			                                      config.max_num_post_per_month, config.max_num_friends);
 			auto flashmob_posts = NumPostsPerForum(config, dates, current_random_farm, wall,
 			                                       config.max_num_flashmob_post_per_month, config.max_num_friends);
-			current_profile.requested_uniform_posts += uniform_posts;
-			current_profile.requested_flashmob_posts += flashmob_posts;
 			{
-				LdbcScopedProfileAccumulator timer(current_profile.wall_uniform_posts_ms);
 				ConsumeUniformPosts(config, dates, dictionaries, delete_distribution, current_random_farm, wall,
 				                    wall_post_memberships, wall_forum_memberships, uniform_posts,
 				                    NumericCast<int64_t>(current_block_id), current_local_message_id);
 			}
 			{
-				LdbcScopedProfileAccumulator timer(current_profile.wall_flashmob_posts_ms);
 				ConsumeFlashmobPosts(config, dates, dictionaries, flashmobs, flashmob_dates, delete_distribution,
 				                     current_random_farm, wall, wall_post_memberships, wall_forum_memberships,
 				                     flashmob_posts, NumericCast<int64_t>(current_block_id), current_local_message_id);
 			}
-			RecordForum(current_profile, wall, true, false, false);
 			output_forums.push_back(std::move(wall));
 		} else {
 			current_local_forum_id++;
@@ -2639,7 +2284,6 @@ struct LdbcForumGenerator::Impl {
 			LdbcForum forum;
 			bool created_group;
 			{
-				LdbcScopedProfileAccumulator timer(current_profile.create_group_ms);
 				created_group =
 				    CreateGroupForum(config, dates, dictionaries, current_random_farm, person, current_block, friends,
 				                     current_local_forum_id, current_block_id, forum);
@@ -2658,22 +2302,17 @@ struct LdbcForumGenerator::Impl {
 				auto flashmob_posts =
 				    NumPostsPerForum(config, dates, current_random_farm, forum,
 				                     config.max_num_group_flashmob_post_per_month, config.max_group_size);
-				current_profile.requested_uniform_posts += uniform_posts;
-				current_profile.requested_flashmob_posts += flashmob_posts;
 				{
-					LdbcScopedProfileAccumulator timer(current_profile.group_uniform_posts_ms);
 					ConsumeUniformPosts(config, dates, dictionaries, delete_distribution, current_random_farm, forum,
 					                    group_post_memberships, group_post_memberships, uniform_posts,
 					                    NumericCast<int64_t>(current_block_id), current_local_message_id);
 				}
 				{
-					LdbcScopedProfileAccumulator timer(current_profile.group_flashmob_posts_ms);
 					ConsumeFlashmobPosts(config, dates, dictionaries, flashmobs, flashmob_dates, delete_distribution,
 					                     current_random_farm, forum, group_post_memberships, group_post_memberships,
 					                     flashmob_posts, NumericCast<int64_t>(current_block_id),
 					                     current_local_message_id);
 				}
-				RecordForum(current_profile, forum, false, true, false);
 				output_forums.push_back(std::move(forum));
 			}
 			current_local_forum_id++;
@@ -2687,7 +2326,6 @@ struct LdbcForumGenerator::Impl {
 			LdbcForum forum;
 			bool created_album;
 			{
-				LdbcScopedProfileAccumulator timer(current_profile.create_album_ms);
 				created_album = CreateAlbumForum(config, dates, dictionaries, current_random_farm, person, friends,
 				                                 current_local_forum_id, album_idx, current_block_id, forum);
 			}
@@ -2702,36 +2340,15 @@ struct LdbcForumGenerator::Impl {
 				}
 				auto photo_count =
 				    current_random_farm.Get(LdbcRandomAspect::NUM_PHOTO).NextInt(config.max_num_photo_per_albums + 1);
-				current_profile.requested_photos += photo_count;
 				{
-					LdbcScopedProfileAccumulator timer(current_profile.album_photos_ms);
 					ConsumePhotos(config, dates, dictionaries, popular_places, delete_distribution, current_random_farm,
 					              forum, person, album_memberships, photo_count, NumericCast<int64_t>(current_block_id),
 					              current_local_message_id);
 				}
-				RecordForum(current_profile, forum, false, false, true);
 				output_forums.push_back(std::move(forum));
 			}
 			current_local_forum_id++;
 		}
-	}
-
-	static void RecordForum(LdbcForumGenerationProfile &profile, const LdbcForum &forum, bool wall, bool group,
-	                        bool album) {
-		if (wall) {
-			profile.wall_forums++;
-		}
-		if (group) {
-			profile.group_forums++;
-		}
-		if (album) {
-			profile.album_forums++;
-		}
-		profile.memberships += NumericCast<int64_t>(forum.memberships.size());
-		profile.emitted_posts += NumericCast<int64_t>(forum.posts.size());
-		profile.emitted_comments += NumericCast<int64_t>(forum.comments.size());
-		profile.emitted_post_likes += NumericCast<int64_t>(forum.post_likes.size());
-		profile.emitted_comment_likes += NumericCast<int64_t>(forum.comment_likes.size());
 	}
 
 	const LdbcDatagenConfig &config;
@@ -2743,9 +2360,6 @@ struct LdbcForumGenerator::Impl {
 	ClientContext *context;
 	LdbcForumGenerator::BlockCallback block_callback;
 	LdbcForumGenerator::SliceCallback slice_callback;
-	LdbcForumGenerationProfile profile;
-	LdbcForumGenerationProfile *previous_profile = nullptr;
-	double profile_start = LdbcPersonProfileNowMs();
 	LdbcDateGenerator dates;
 	LdbcPersonDictionaries dictionaries;
 	LdbcFlashmobDictionary flashmobs;

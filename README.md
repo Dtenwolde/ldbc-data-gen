@@ -24,22 +24,39 @@ CALL ldbcgen(
     target := 'tables',
     schema := 'main',
     format := 'parquet',
+    threads := 4,
     overwrite := false,
+    primary_keys := false,
     dictionary_dir := 'third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries'
 );
 ```
 
 The current implementation validates parameters and generates the BI initial snapshot relations plus BI insert and delete batches either as DuckDB tables or as files.
 
+`ldbcgen` accepts the following named parameters:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `sf` | `1.0` | Scale factor; must be greater than zero |
+| `catalog` | Current catalog | Catalog used for table output |
+| `output_dir` | Empty | Required destination when `target := 'files'` |
+| `target` | `'tables'` | Generate DuckDB `tables` or Spark-compatible `files` |
+| `schema` | Current schema | Schema used for table output |
+| `format` | `'parquet'` | File format: `parquet` or `csv` |
+| `dictionary_dir` | Pinned Spark dictionary directory | Source dictionaries |
+| `threads` | DuckDB thread count | Generator worker count; must be greater than zero |
+| `overwrite` | `false` | Replace existing tables or files |
+| `primary_keys` | `false` | Add primary-key constraints to generated DuckDB tables |
+
 Returned columns:
 
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `relation_name` | `VARCHAR` | Generated relation or logical artifact name |
-| `path` | `VARCHAR` | Output schema for table generation, or output path for file generation |
+| `path` | `VARCHAR` | Qualified table name, or output file/directory path |
 | `row_count` | `BIGINT` | Generated row count |
 | `checksum` | `VARCHAR` | Stable content checksum, nullable while planning |
-| `format` | `VARCHAR` | `parquet` or `csv` |
+| `format` | `VARCHAR` | `table`, `parquet`, or `csv` |
 | `status` | `VARCHAR` | `created` or `recreated` |
 
 The default generation target is in-database DuckDB tables. It creates the 18 BI initial snapshot relations using their BI relation names, and dynamic update relations using `inserts_<relation>` and `deletes_<relation>` table names with lowercase relation suffixes, for example `inserts_post` and `deletes_person_likes_comment`.
@@ -55,7 +72,7 @@ CALL ldbcgen(
 );
 ```
 
-File output writes one file per BI static relation under `<output_dir>/static/` and `<output_dir>/dynamic/`. It also writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing files.
+File output writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Parquet snapshots are streamed directly to numbered part files for the generated person/forum relations; other relations and CSV output are copied from staging tables. Consequently, a returned `path` can identify either a single file or a relation directory containing part files. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing output.
 
 Schema-only metadata is available through:
 
@@ -215,4 +232,7 @@ Build and test the extension:
 ```sh
 make
 make test
+make format-check
 ```
+
+Before changing generation logic, also run the SF1 checksum and BI-result parity command shown above. CI repeats that check with one thread so deterministic output changes are explicit.

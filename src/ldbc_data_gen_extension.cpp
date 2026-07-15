@@ -39,108 +39,15 @@
 #include "writer/primitive_column_writer.hpp"
 
 #include <atomic>
-#include <array>
-#include <chrono>
-#include <cstdlib>
 #include <fstream>
 #include <iomanip>
-#include <iostream>
 #include <limits>
-#include <map>
 #include <mutex>
 #include <set>
 #include <sstream>
 #include <unordered_map>
 
-#include <sys/resource.h>
-
 namespace duckdb {
-
-static bool LdbcProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_PROFILE") != nullptr;
-	return enabled;
-}
-
-static double LdbcProfileNowMs() {
-	using namespace std::chrono;
-	return static_cast<double>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count()) / 1000.0;
-}
-
-class LdbcProfileTimer {
-public:
-	explicit LdbcProfileTimer(const char *name_p) : name(name_p), enabled(LdbcProfileEnabled()) {
-		if (enabled) {
-			start_ms = LdbcProfileNowMs();
-		}
-	}
-
-	~LdbcProfileTimer() {
-		if (enabled) {
-			std::cerr << "[ldbcgen] " << name << ": " << std::fixed << std::setprecision(3)
-			          << (LdbcProfileNowMs() - start_ms) << " ms" << std::endl;
-		}
-	}
-
-private:
-	const char *name;
-	bool enabled;
-	double start_ms = 0;
-};
-
-static bool LdbcPhaseProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_PHASE_PROFILE") != nullptr;
-	return enabled;
-}
-
-static bool LdbcAppendProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_APPEND_PROFILE") != nullptr;
-	return enabled;
-}
-
-static bool LdbcChunkProfileEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_CHUNK_PROFILE") != nullptr;
-	return enabled;
-}
-
-static bool LdbcDirectSnapshotCollectionsEnabled() {
-	static bool enabled = std::getenv("LDBCGEN_DIRECT_SNAPSHOT_CHUNKS") == nullptr;
-	return enabled;
-}
-
-static double ldbc_chunk_flush_ms = 0;
-static idx_t ldbc_chunk_flush_calls = 0;
-
-struct LdbcProfileSample {
-	double wall_ms = 0;
-	double user_ms = 0;
-	double system_ms = 0;
-};
-
-static double LdbcTimevalMs(const timeval &time) {
-	return static_cast<double>(time.tv_sec) * 1000.0 + static_cast<double>(time.tv_usec) / 1000.0;
-}
-
-static LdbcProfileSample LdbcProfileSampleNow() {
-	LdbcProfileSample sample;
-	sample.wall_ms = LdbcProfileNowMs();
-	rusage usage;
-	if (getrusage(RUSAGE_SELF, &usage) == 0) {
-		sample.user_ms = LdbcTimevalMs(usage.ru_utime);
-		sample.system_ms = LdbcTimevalMs(usage.ru_stime);
-	}
-	return sample;
-}
-
-static LdbcProfileSample LdbcProfileSampleDelta(const LdbcProfileSample &end, const LdbcProfileSample &start) {
-	return {end.wall_ms - start.wall_ms, end.user_ms - start.user_ms, end.system_ms - start.system_ms};
-}
-
-static double LdbcProfileCpuPercent(const LdbcProfileSample &sample) {
-	if (sample.wall_ms <= 0) {
-		return 0;
-	}
-	return 100.0 * (sample.user_ms + sample.system_ms) / sample.wall_ms;
-}
 
 struct LdbcSchemaColumn {
 	const char *relation_name;
@@ -281,41 +188,9 @@ struct LdbcGenBindData : public TableFunctionData {
 	bool visible_updates = false;
 	bool direct_forum_parquet = false;
 	bool direct_person_parquet = false;
-	bool direct_forum_update_parquet = false;
-	bool forum_update_copy_table_function = false;
-	string forum_update_chunk_token;
 };
 
-struct LdbcForumUpdateChunkRegistryEntry {
-	unordered_map<string, vector<unique_ptr<DataChunk>>> chunks;
-};
-
-static std::mutex ldbc_forum_update_chunk_registry_lock;
-static unordered_map<string, shared_ptr<LdbcForumUpdateChunkRegistryEntry>> ldbc_forum_update_chunk_registry;
 static void ExecuteLdbcSQL(ClientContext &context, const string &sql);
-
-static bool HasLdbcForumUpdateChunks(const string &token, const string &operation, const string &relation_name) {
-	std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
-	auto token_entry = ldbc_forum_update_chunk_registry.find(token);
-	if (token_entry == ldbc_forum_update_chunk_registry.end()) {
-		return false;
-	}
-	return token_entry->second->chunks.find(operation + ":" + relation_name) != token_entry->second->chunks.end();
-}
-
-static void ExecuteLdbcProfiledForumUpdateCopy(ClientContext &context, const string &sql, const string &operation,
-                                               const string &relation_name) {
-	if (!LdbcPhaseProfileEnabled()) {
-		ExecuteLdbcSQL(context, sql);
-		return;
-	}
-	auto start = LdbcProfileSampleNow();
-	ExecuteLdbcSQL(context, sql);
-	auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), start);
-	std::cerr << "[ldbcgen] file.copy_forum_update_chunks." << operation << "." << relation_name
-	          << ": wall=" << std::fixed << std::setprecision(3) << delta.wall_ms << " user=" << delta.user_ms
-	          << " system=" << delta.system_ms << " cpu=" << LdbcProfileCpuPercent(delta) << "%\n";
-}
 
 class LdbcLoadGenerator;
 
@@ -323,15 +198,8 @@ static const LdbcSchemaColumn &LdbcRelationAt(idx_t relation_index);
 static idx_t LdbcRelationIndexByName(const string &relation_name);
 static string LdbcSparkRelationBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
                                              const string &operation, const LdbcSchemaColumn &relation, idx_t block_id);
-static string LdbcSparkRelationPartitionBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                      const string &operation, const LdbcSchemaColumn &relation,
-                                                      const string &partition_value, idx_t block_id);
 static vector<string> LdbcRelationColumnNames(const string &relation_name);
 static vector<LogicalType> LdbcRelationTypes(const string &relation_name);
-static vector<LogicalType> LdbcInsertTypes(const string &relation_name);
-static vector<LogicalType> LdbcDeleteTypes(const string &relation_name);
-static vector<string> LdbcInsertColumnNames(const string &relation_name);
-static vector<string> LdbcDeleteColumnNames(const string &relation_name);
 static void WriteLdbcChunksToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
                                      const vector<string> &names, vector<unique_ptr<DataChunk>> &chunks);
 static void WriteLdbcCollectionToParquet(ClientContext &context, const string &path, const vector<LogicalType> &types,
@@ -407,21 +275,6 @@ struct LdbcGenSchemaBindData : public TableFunctionData {
 
 struct LdbcGenSchemaGlobalState : public GlobalTableFunctionState {
 	idx_t offset = 0;
-};
-
-struct LdbcForumUpdateChunkBindData : public TableFunctionData {
-	string token;
-	string operation;
-	string relation_name;
-};
-
-struct LdbcForumUpdateChunkGlobalState : public GlobalTableFunctionState {
-	idx_t MaxThreads() const override {
-		return chunks.empty() ? 1 : chunks.size();
-	}
-
-	std::atomic<idx_t> offset {0};
-	vector<unique_ptr<DataChunk>> chunks;
 };
 
 struct LdbcJavaRandomBindData : public TableFunctionData {
@@ -993,13 +846,7 @@ public:
 	}
 
 	void AppendChunk(DataChunk &source) {
-		auto profile = LdbcChunkProfileEnabled();
-		auto start_ms = profile ? LdbcProfileNowMs() : 0;
 		appender->AppendDataChunk(source);
-		if (profile) {
-			ldbc_chunk_flush_ms += LdbcProfileNowMs() - start_ms;
-			ldbc_chunk_flush_calls++;
-		}
 	}
 
 private:
@@ -1007,14 +854,8 @@ private:
 		if (row == 0) {
 			return;
 		}
-		auto profile = LdbcChunkProfileEnabled();
-		auto start_ms = profile ? LdbcProfileNowMs() : 0;
 		chunk.SetCardinality(row);
 		appender->AppendDataChunk(chunk);
-		if (profile) {
-			ldbc_chunk_flush_ms += LdbcProfileNowMs() - start_ms;
-			ldbc_chunk_flush_calls++;
-		}
 		chunk.Reset();
 		row = 0;
 	}
@@ -1549,280 +1390,6 @@ struct PersonOwnedRowCounts {
 	idx_t comment_likes = 0;
 };
 
-static PersonOwnedRowCounts AppendPersonOwnedTables(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                    LdbcGenGlobalState *progress_state) {
-	LdbcProfileTimer timer("populate.dynamic.total");
-	auto resource_dir = ResourceDirFromDictionaryDir(bind_data.dictionary_dir);
-	auto config = LdbcDatagenConfig::Load(bind_data.scale_factor, resource_dir);
-	LdbcDateGenerator dates(config);
-	vector<LdbcPersonCore> persons;
-	{
-		LdbcProfileTimer phase("generate.persons");
-		persons = LdbcGeneratePersons(config);
-	}
-	SetLdbcGenProgress(progress_state, 25.0);
-	LdbcProfileTimer append_timer("append.dynamic.total");
-	auto person_appender = MakeStaticAppender(context, bind_data, "Person");
-	auto interest_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Person_hasInterest_Tag");
-	auto study_appender = MakeStaticAppender(context, bind_data, "Person_studyAt_University");
-	auto work_appender = MakeStaticAppender(context, bind_data, "Person_workAt_Company");
-	auto knows_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_knows_Person");
-	auto forum_appender = MakeStaticAppender(context, bind_data, "Forum");
-	auto forum_member_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Forum_hasMember_Person");
-	auto forum_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Forum_hasTag_Tag");
-	auto post_appender = MakeStaticAppender(context, bind_data, "Post");
-	auto post_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Post_hasTag_Tag");
-	auto comment_appender = MakeStaticAppender(context, bind_data, "Comment");
-	auto comment_tag_appender = MakeTimestampInt64Int32Appender(context, bind_data, "Comment_hasTag_Tag");
-	auto post_like_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_likes_Post");
-	auto comment_like_appender = MakeTimestampInt64Int64Appender(context, bind_data, "Person_likes_Comment");
-	auto bulkload_threshold =
-	    dates.SimulationEnd() -
-	    static_cast<int64_t>(static_cast<double>(dates.SimulationEnd() - dates.SimulationStart()) *
-	                         (1.0 - config.bulkload_portion));
-
-	PersonOwnedRowCounts row_counts;
-	{
-		LdbcProfileTimer phase("append.person_owned");
-		for (idx_t person_idx = 0; person_idx < persons.size(); person_idx++) {
-			auto &person = persons[person_idx];
-			if (person.creation_date >= bulkload_threshold) {
-				continue;
-			}
-
-			person_appender->BeginRow();
-			person_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-			person_appender->Append<int64_t>(person.account_id);
-			person_appender->Append(Value(person.first_name));
-			person_appender->Append(Value(person.last_name));
-			person_appender->Append(Value(person.gender == 0 ? string("female") : string("male")));
-			person_appender->Append(Value::DATE(LdbcDateFromEpochMs(person.birthday)));
-			person_appender->Append(Value(person.ip_address));
-			person_appender->Append(Value(person.browser_name));
-			person_appender->Append<int32_t>(person.city_id);
-			person_appender->Append(Value(person.languages));
-			person_appender->Append(Value(person.emails));
-			person_appender->EndRow();
-			row_counts.persons++;
-
-			for (auto tag_id : person.interests) {
-				AppendTimestampMsInt64Int32Row(interest_appender, person.creation_date, person.account_id, tag_id);
-				row_counts.interests++;
-			}
-
-			if (person.university_id != -1 && person.class_year != -1) {
-				study_appender->BeginRow();
-				study_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-				study_appender->Append<int64_t>(person.account_id);
-				study_appender->Append<int64_t>(person.university_id);
-				study_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(person.class_year)));
-				study_appender->EndRow();
-				row_counts.study_at++;
-			}
-
-			for (auto &company : person.companies) {
-				work_appender->BeginRow();
-				work_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(person.creation_date)));
-				work_appender->Append<int64_t>(person.account_id);
-				work_appender->Append<int64_t>(company.first);
-				work_appender->Append<int32_t>(Date::ExtractYear(LdbcDateFromEpochMs(company.second)));
-				work_appender->EndRow();
-				row_counts.work_at++;
-			}
-			if ((person_idx & 1023) == 0) {
-				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(25.0, 45.0, person_idx + 1, persons.size()));
-			}
-		}
-	}
-	SetLdbcGenProgress(progress_state, 45.0);
-
-	vector<LdbcKnowsEdge> knows_edges;
-	{
-		LdbcProfileTimer phase("generate.knows");
-		knows_edges = LdbcGenerateKnows(config, persons);
-	}
-	SetLdbcGenProgress(progress_state, 55.0);
-	{
-		LdbcProfileTimer phase("append.knows");
-		for (idx_t edge_idx = 0; edge_idx < knows_edges.size(); edge_idx++) {
-			auto &edge = knows_edges[edge_idx];
-			if (edge.creation_date >= bulkload_threshold) {
-				continue;
-			}
-			AppendTimestampMsInt64Int64Row(knows_appender, edge.creation_date, edge.person1_id, edge.person2_id);
-			row_counts.knows++;
-			if ((edge_idx & 4095) == 0) {
-				SetLdbcGenProgress(progress_state, LdbcGenProgressRange(55.0, 65.0, edge_idx + 1, knows_edges.size()));
-			}
-		}
-	}
-	SetLdbcGenProgress(progress_state, 65.0);
-
-	{
-		LdbcProfileTimer phase("generate.forums");
-		auto append_forum = [&](LdbcForum &&forum) {
-			if (forum.creation_date < bulkload_threshold) {
-				forum_appender->BeginRow();
-				forum_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(forum.creation_date)));
-				forum_appender->Append<int64_t>(forum.id);
-				forum_appender->Append(Value(forum.title));
-				forum_appender->Append<int64_t>(forum.moderator_person_id);
-				forum_appender->EndRow();
-				row_counts.forums++;
-
-				for (auto tag_id : forum.tags) {
-					AppendTimestampMsInt64Int32Row(forum_tag_appender, forum.creation_date, forum.id, tag_id);
-					row_counts.forum_tags++;
-				}
-			}
-
-			for (auto &membership : forum.memberships) {
-				if (membership.creation_date >= bulkload_threshold) {
-					continue;
-				}
-				AppendTimestampMsInt64Int64Row(forum_member_appender, membership.creation_date, membership.forum_id,
-				                               membership.person_id);
-				row_counts.forum_members++;
-			}
-
-			for (auto &post : forum.posts) {
-				if (post.creation_date >= bulkload_threshold) {
-					continue;
-				}
-				post_appender->BeginRow();
-				post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
-				post_appender->Append<int64_t>(post.id);
-				post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR) : Value(post.image_file));
-				post_appender->Append(Value(post.location_ip));
-				post_appender->Append(Value(post.browser_used));
-				post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR) : Value(post.language));
-				post_appender->Append(post.image_file.empty() ? Value(post.content) : Value(LogicalType::VARCHAR));
-				post_appender->Append<int32_t>(post.length);
-				post_appender->Append<int64_t>(post.creator_person_id);
-				post_appender->Append<int64_t>(post.forum_id);
-				post_appender->Append<int64_t>(post.location_country_id);
-				post_appender->EndRow();
-				row_counts.posts++;
-
-				for (auto tag_id : post.tags) {
-					AppendTimestampMsInt64Int32Row(post_tag_appender, post.creation_date, post.id, tag_id);
-					row_counts.post_tags++;
-				}
-			}
-
-			for (auto &comment : forum.comments) {
-				if (comment.creation_date >= bulkload_threshold) {
-					continue;
-				}
-				comment_appender->BeginRow();
-				comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
-				comment_appender->Append<int64_t>(comment.id);
-				comment_appender->Append(Value(comment.location_ip));
-				comment_appender->Append(Value(comment.browser_used));
-				comment_appender->Append(Value(comment.content));
-				comment_appender->Append<int32_t>(comment.length);
-				comment_appender->Append<int64_t>(comment.creator_person_id);
-				comment_appender->Append<int64_t>(comment.location_country_id);
-				comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
-				                                                      : Value::BIGINT(comment.parent_post_id));
-				comment_appender->Append(comment.parent_comment_id == -1 ? Value(LogicalType::BIGINT)
-				                                                         : Value::BIGINT(comment.parent_comment_id));
-				comment_appender->EndRow();
-				row_counts.comments++;
-
-				for (auto tag_id : comment.tags) {
-					AppendTimestampMsInt64Int32Row(comment_tag_appender, comment.creation_date, comment.id, tag_id);
-					row_counts.comment_tags++;
-				}
-			}
-
-			for (auto &like : forum.post_likes) {
-				if (like.creation_date >= bulkload_threshold) {
-					continue;
-				}
-				AppendTimestampMsInt64Int64Row(post_like_appender, like.creation_date, like.person_id, like.message_id);
-				row_counts.post_likes++;
-			}
-
-			for (auto &like : forum.comment_likes) {
-				if (like.creation_date >= bulkload_threshold) {
-					continue;
-				}
-				AppendTimestampMsInt64Int64Row(comment_like_appender, like.creation_date, like.person_id,
-				                               like.message_id);
-				row_counts.comment_likes++;
-			}
-		};
-		LdbcGenerateForums(config, persons, knows_edges, append_forum, [&](idx_t done, idx_t total) {
-			SetLdbcGenProgress(progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
-		});
-	}
-	SetLdbcGenProgress(progress_state, 98.0);
-	person_appender->Close();
-	interest_appender.Close();
-	study_appender->Close();
-	work_appender->Close();
-	knows_appender.Close();
-	forum_appender->Close();
-	forum_member_appender.Close();
-	forum_tag_appender.Close();
-	post_appender->Close();
-	post_tag_appender.Close();
-	comment_appender->Close();
-	comment_tag_appender.Close();
-	post_like_appender.Close();
-	comment_like_appender.Close();
-	return row_counts;
-}
-
-static unordered_map<string, idx_t> PopulateStaticTables(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                         LdbcGenGlobalState *progress_state = nullptr) {
-	LdbcProfileTimer timer("populate.total");
-	StaticDictionaryData data;
-	{
-		LdbcProfileTimer phase("load.static_dictionaries");
-		data = LoadStaticDictionaryData(bind_data);
-	}
-	SetLdbcGenProgress(progress_state, 4.0);
-	unordered_map<string, idx_t> row_counts;
-	{
-		LdbcProfileTimer phase("append.static.Place");
-		row_counts["Place"] = AppendPlaces(context, bind_data, data);
-	}
-	SetLdbcGenProgress(progress_state, 8.0);
-	{
-		LdbcProfileTimer phase("append.static.TagClass");
-		row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
-	}
-	SetLdbcGenProgress(progress_state, 12.0);
-	{
-		LdbcProfileTimer phase("append.static.Tag");
-		row_counts["Tag"] = AppendTags(context, bind_data, data);
-	}
-	SetLdbcGenProgress(progress_state, 16.0);
-	{
-		LdbcProfileTimer phase("append.static.Organisation");
-		row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
-	}
-	SetLdbcGenProgress(progress_state, 20.0);
-	auto person_counts = AppendPersonOwnedTables(context, bind_data, progress_state);
-	row_counts["Person"] = person_counts.persons;
-	row_counts["Person_hasInterest_Tag"] = person_counts.interests;
-	row_counts["Person_knows_Person"] = person_counts.knows;
-	row_counts["Person_studyAt_University"] = person_counts.study_at;
-	row_counts["Person_workAt_Company"] = person_counts.work_at;
-	row_counts["Forum"] = person_counts.forums;
-	row_counts["Forum_hasMember_Person"] = person_counts.forum_members;
-	row_counts["Forum_hasTag_Tag"] = person_counts.forum_tags;
-	row_counts["Post"] = person_counts.posts;
-	row_counts["Post_hasTag_Tag"] = person_counts.post_tags;
-	row_counts["Comment"] = person_counts.comments;
-	row_counts["Comment_hasTag_Tag"] = person_counts.comment_tags;
-	row_counts["Person_likes_Post"] = person_counts.post_likes;
-	row_counts["Person_likes_Comment"] = person_counts.comment_likes;
-	return row_counts;
-}
-
 static bool LdbcDirectPersonParquetRelation(const string &relation_name);
 
 class LdbcLoadGenerator {
@@ -1833,59 +1400,44 @@ public:
 
 	bool GenerateNext() {
 		switch (phase) {
-		case Phase::LOAD_STATIC: {
-			LdbcScopedPhaseProfile phase_profile(*this, phase);
+		case Phase::LOAD_STATIC:
 			LoadStatic();
-		}
 			phase = Phase::GENERATE_PERSONS;
 			return false;
 		case Phase::GENERATE_PERSONS:
-			if (!RunProfiledPhase([&]() { return GeneratePersons(); })) {
+			if (!GeneratePersons()) {
 				return false;
 			}
 			phase = Phase::APPEND_PERSONS;
 			return false;
 		case Phase::APPEND_PERSONS:
-			if (!RunProfiledPhase([&]() {
-				    auto done = AppendPersons();
-				    if (done) {
-					    FlushPersonRowsSnapshotParquet();
-				    }
-				    return done;
-			    })) {
+			if (!AppendPersons()) {
 				return false;
 			}
+			FlushPersonRowsSnapshotParquet();
 			phase = Phase::GENERATE_KNOWS;
 			return false;
 		case Phase::GENERATE_KNOWS:
-			if (!RunProfiledPhase([&]() { return GenerateKnows(); })) {
+			if (!GenerateKnows()) {
 				return false;
 			}
 			phase = Phase::APPEND_KNOWS;
 			return false;
 		case Phase::APPEND_KNOWS:
-			if (!RunProfiledPhase([&]() {
-				    auto done = AppendKnows();
-				    if (done) {
-					    FlushKnowsSnapshotParquet();
-				    }
-				    return done;
-			    })) {
+			if (!AppendKnows()) {
 				return false;
 			}
+			FlushKnowsSnapshotParquet();
 			phase = Phase::GENERATE_FORUMS;
 			return false;
 		case Phase::GENERATE_FORUMS:
-			if (!RunProfiledPhase([&]() { return GenerateForums(); })) {
+			if (!GenerateForums()) {
 				return false;
 			}
 			phase = Phase::CLOSE;
 			return false;
-		case Phase::CLOSE: {
-			LdbcScopedPhaseProfile phase_profile(*this, phase);
+		case Phase::CLOSE:
 			Close();
-		}
-			PrintPhaseProfile();
 			phase = Phase::DONE;
 			return true;
 		case Phase::DONE:
@@ -1909,213 +1461,6 @@ private:
 		GENERATE_FORUMS,
 		CLOSE,
 		DONE
-	};
-
-	static constexpr idx_t PHASE_COUNT = 7;
-
-	enum class ForumAppendPart : uint8_t { FORUM, MEMBERSHIPS, POSTS, COMMENTS, POST_LIKES, COMMENT_LIKES };
-
-	static constexpr idx_t FORUM_APPEND_PART_COUNT = 6;
-
-	static const char *PhaseName(Phase phase) {
-		switch (phase) {
-		case Phase::LOAD_STATIC:
-			return "load_static";
-		case Phase::GENERATE_PERSONS:
-			return "generate_persons";
-		case Phase::APPEND_PERSONS:
-			return "append_persons";
-		case Phase::GENERATE_KNOWS:
-			return "generate_knows";
-		case Phase::APPEND_KNOWS:
-			return "append_knows";
-		case Phase::GENERATE_FORUMS:
-			return "generate_forums";
-		case Phase::CLOSE:
-			return "close_appenders";
-		case Phase::DONE:
-			return "done";
-		default:
-			return "unknown";
-		}
-	}
-
-	static idx_t PhaseIndex(Phase phase) {
-		return static_cast<idx_t>(phase);
-	}
-
-	static const char *ForumAppendPartName(ForumAppendPart part) {
-		switch (part) {
-		case ForumAppendPart::FORUM:
-			return "forum";
-		case ForumAppendPart::MEMBERSHIPS:
-			return "memberships";
-		case ForumAppendPart::POSTS:
-			return "posts";
-		case ForumAppendPart::COMMENTS:
-			return "comments";
-		case ForumAppendPart::POST_LIKES:
-			return "post_likes";
-		case ForumAppendPart::COMMENT_LIKES:
-			return "comment_likes";
-		default:
-			return "unknown";
-		}
-	}
-
-	class LdbcScopedPhaseProfile {
-	public:
-		LdbcScopedPhaseProfile(LdbcLoadGenerator &generator_p, Phase phase_p)
-		    : generator(generator_p), phase(phase_p), enabled(LdbcPhaseProfileEnabled()) {
-			if (enabled) {
-				start = LdbcProfileSampleNow();
-			}
-		}
-
-		~LdbcScopedPhaseProfile() {
-			if (!enabled) {
-				return;
-			}
-			generator.RecordPhaseProfile(phase, LdbcProfileSampleDelta(LdbcProfileSampleNow(), start));
-		}
-
-	private:
-		LdbcLoadGenerator &generator;
-		Phase phase;
-		bool enabled;
-		LdbcProfileSample start;
-	};
-
-	template <class FUNC>
-	bool RunProfiledPhase(FUNC function) {
-		LdbcScopedPhaseProfile phase_profile(*this, phase);
-		return function();
-	}
-
-	void RecordPhaseProfile(Phase phase, const LdbcProfileSample &delta) {
-		auto index = PhaseIndex(phase);
-		if (index >= PHASE_COUNT) {
-			return;
-		}
-		auto &target = phase_profiles[index];
-		target.wall_ms += delta.wall_ms;
-		target.user_ms += delta.user_ms;
-		target.system_ms += delta.system_ms;
-		phase_profile_calls[index]++;
-	}
-
-	void PrintPhaseProfile() const {
-		if (!LdbcPhaseProfileEnabled()) {
-			return;
-		}
-		std::cerr << "[ldbcgen] phase profile summary (wall/user/system ms, cpu%, calls)\n";
-		LdbcProfileSample total;
-		for (idx_t index = 0; index < PHASE_COUNT; index++) {
-			total.wall_ms += phase_profiles[index].wall_ms;
-			total.user_ms += phase_profiles[index].user_ms;
-			total.system_ms += phase_profiles[index].system_ms;
-		}
-		for (idx_t index = 0; index < PHASE_COUNT; index++) {
-			auto phase = static_cast<Phase>(index);
-			auto &sample = phase_profiles[index];
-			std::cerr << "[ldbcgen] phase." << PhaseName(phase) << ": wall=" << std::fixed << std::setprecision(3)
-			          << sample.wall_ms << " user=" << sample.user_ms << " system=" << sample.system_ms
-			          << " cpu=" << LdbcProfileCpuPercent(sample) << "% calls=" << phase_profile_calls[index] << "\n";
-		}
-		std::cerr << "[ldbcgen] phase.total: wall=" << std::fixed << std::setprecision(3) << total.wall_ms
-		          << " user=" << total.user_ms << " system=" << total.system_ms
-		          << " cpu=" << LdbcProfileCpuPercent(total) << "%\n";
-		auto forum_phase = phase_profiles[PhaseIndex(Phase::GENERATE_FORUMS)];
-		if (forum_append_profile.wall_ms > 0) {
-			auto forum_non_append = LdbcProfileSampleDelta(forum_phase, forum_append_profile);
-			std::cerr << "[ldbcgen] phase.generate_forums.append_callback: wall=" << std::fixed << std::setprecision(3)
-			          << forum_append_profile.wall_ms << " user=" << forum_append_profile.user_ms
-			          << " system=" << forum_append_profile.system_ms
-			          << " cpu=" << LdbcProfileCpuPercent(forum_append_profile)
-			          << "% calls=" << forum_append_profile_calls << "\n";
-			std::cerr << "[ldbcgen] phase.generate_forums.non_append: wall=" << std::fixed << std::setprecision(3)
-			          << forum_non_append.wall_ms << " user=" << forum_non_append.user_ms
-			          << " system=" << forum_non_append.system_ms << " cpu=" << LdbcProfileCpuPercent(forum_non_append)
-			          << "%\n";
-		}
-		if (forum_materialize_profile.wall_ms > 0) {
-			std::cerr << "[ldbcgen] phase.generate_forums.materialize_chunks: wall=" << std::fixed
-			          << std::setprecision(3) << forum_materialize_profile.wall_ms
-			          << " user=" << forum_materialize_profile.user_ms
-			          << " system=" << forum_materialize_profile.system_ms
-			          << " cpu=" << LdbcProfileCpuPercent(forum_materialize_profile)
-			          << "% calls=" << forum_materialize_profile_calls << "\n";
-		}
-		if (forum_append_chunks_profile.wall_ms > 0) {
-			std::cerr << "[ldbcgen] phase.generate_forums.append_chunks: wall=" << std::fixed << std::setprecision(3)
-			          << forum_append_chunks_profile.wall_ms << " user=" << forum_append_chunks_profile.user_ms
-			          << " system=" << forum_append_chunks_profile.system_ms
-			          << " cpu=" << LdbcProfileCpuPercent(forum_append_chunks_profile)
-			          << "% calls=" << forum_append_chunks_profile_calls << "\n";
-		}
-		if (LdbcAppendProfileEnabled()) {
-			for (idx_t index = 0; index < FORUM_APPEND_PART_COUNT; index++) {
-				auto part = static_cast<ForumAppendPart>(index);
-				std::cerr << "[ldbcgen] append.forums." << ForumAppendPartName(part) << ": wall=" << std::fixed
-				          << std::setprecision(3) << forum_append_part_ms[index]
-				          << " ms calls=" << forum_append_part_calls[index] << "\n";
-			}
-		}
-		if (LdbcChunkProfileEnabled()) {
-			std::cerr << "[ldbcgen] chunk.flush: wall=" << std::fixed << std::setprecision(3) << ldbc_chunk_flush_ms
-			          << " ms calls=" << ldbc_chunk_flush_calls << "\n";
-		}
-	}
-
-	class LdbcScopedForumAppendProfile {
-	public:
-		explicit LdbcScopedForumAppendProfile(LdbcLoadGenerator &generator_p)
-		    : generator(generator_p), enabled(LdbcPhaseProfileEnabled()) {
-			if (enabled) {
-				start = LdbcProfileSampleNow();
-			}
-		}
-
-		~LdbcScopedForumAppendProfile() {
-			if (!enabled) {
-				return;
-			}
-			auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), start);
-			generator.forum_append_profile.wall_ms += delta.wall_ms;
-			generator.forum_append_profile.user_ms += delta.user_ms;
-			generator.forum_append_profile.system_ms += delta.system_ms;
-			generator.forum_append_profile_calls++;
-		}
-
-	private:
-		LdbcLoadGenerator &generator;
-		bool enabled;
-		LdbcProfileSample start;
-	};
-
-	class LdbcScopedForumAppendPartProfile {
-	public:
-		LdbcScopedForumAppendPartProfile(LdbcLoadGenerator &generator_p, ForumAppendPart part_p)
-		    : generator(generator_p), part(part_p), enabled(LdbcAppendProfileEnabled()) {
-			if (enabled) {
-				start_ms = LdbcProfileNowMs();
-			}
-		}
-
-		~LdbcScopedForumAppendPartProfile() {
-			if (!enabled) {
-				return;
-			}
-			auto index = static_cast<idx_t>(part);
-			generator.forum_append_part_ms[index] += LdbcProfileNowMs() - start_ms;
-			generator.forum_append_part_calls[index]++;
-		}
-
-	private:
-		LdbcLoadGenerator &generator;
-		ForumAppendPart part;
-		bool enabled;
-		double start_ms = 0;
 	};
 
 	struct ForumChunkBatch {
@@ -2285,8 +1630,7 @@ private:
 	};
 
 	bool UsePrematerializedForumChunks() const {
-		return chunk_message_appenders &&
-		       (std::getenv("LDBCGEN_FORUM_PREMATERIALIZE") != nullptr || bind_data.direct_forum_parquet);
+		return bind_data.direct_forum_parquet;
 	}
 
 	bool UseForumBlockPrematerialization() const {
@@ -2299,14 +1643,6 @@ private:
 
 	bool UseDirectPersonParquet() const {
 		return bind_data.direct_person_parquet;
-	}
-
-	bool UseDirectForumUpdateParquet() const {
-		return bind_data.direct_forum_update_parquet;
-	}
-
-	bool UseForumUpdateCopyTableFunction() const {
-		return bind_data.forum_update_copy_table_function;
 	}
 
 	static bool IsForumGeneratedRelation(const string &relation_name) {
@@ -2460,8 +1796,7 @@ private:
 	}
 
 	void MaterializeForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBatch &target) const {
-		ForumChunkBuilders builders(UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context
-		                                                                                              : nullptr);
+		ForumChunkBuilders builders(UseDirectForumParquet() ? &context : nullptr);
 		AppendForumRange(forums, start, end, builders);
 		target = builders.Finish();
 	}
@@ -2524,17 +1859,13 @@ private:
 		(void)block_start;
 		(void)block_end;
 		ForumChunkBatch batch;
-		auto materialize_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
 		MaterializeForumRange(forums, 0, forums.size(), batch);
 		forums.clear();
 		forums.shrink_to_fit();
-		auto materialize_delta = LdbcPhaseProfileEnabled()
-		                             ? LdbcProfileSampleDelta(LdbcProfileSampleNow(), materialize_start)
-		                             : LdbcProfileSample();
 		if (UseDirectForumParquet()) {
 			WriteForumSnapshotParquetBlock(block_id, batch);
 		}
-		QueueMaterializedForumBatch(block_id, std::move(batch), materialize_delta);
+		QueueMaterializedForumBatch(block_id, std::move(batch));
 	}
 
 	void MaterializeForumSlice(idx_t slice_id, idx_t slice_start, idx_t slice_end, vector<LdbcForum> &forums,
@@ -2546,22 +1877,16 @@ private:
 			std::lock_guard<std::mutex> lock(active_forum_chunk_builders_lock);
 			auto entry = active_forum_chunk_builders.find(slice_id);
 			if (entry == active_forum_chunk_builders.end()) {
-				auto snapshot_context =
-				    UseDirectForumParquet() && LdbcDirectSnapshotCollectionsEnabled() ? &context : nullptr;
+				auto snapshot_context = UseDirectForumParquet() ? &context : nullptr;
 				auto result =
 				    active_forum_chunk_builders.emplace(slice_id, make_uniq<ForumChunkBuilders>(snapshot_context));
 				entry = result.first;
 			}
 			builders = entry->second.get();
 		}
-		auto materialize_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
 		AppendForumRange(forums, 0, forums.size(), *builders);
 		forums.clear();
-		auto materialize_delta = LdbcPhaseProfileEnabled()
-		                             ? LdbcProfileSampleDelta(LdbcProfileSampleNow(), materialize_start)
-		                             : LdbcProfileSample();
 		if (!finished) {
-			RecordForumMaterializeProfile(materialize_delta);
 			return;
 		}
 		unique_ptr<ForumChunkBuilders> completed_builders;
@@ -2579,29 +1904,11 @@ private:
 		if (UseDirectForumParquet()) {
 			WriteForumSnapshotParquetBlock(slice_id, batch);
 		}
-		QueueMaterializedForumBatch(slice_id, std::move(batch), materialize_delta);
+		QueueMaterializedForumBatch(slice_id, std::move(batch));
 	}
 
-	void RecordForumMaterializeProfile(const LdbcProfileSample &materialize_delta) {
-		if (!LdbcPhaseProfileEnabled()) {
-			return;
-		}
+	void QueueMaterializedForumBatch(idx_t block_id, ForumChunkBatch batch) {
 		std::lock_guard<std::mutex> lock(pending_forum_chunk_batches_lock);
-		forum_materialize_profile.wall_ms += materialize_delta.wall_ms;
-		forum_materialize_profile.user_ms += materialize_delta.user_ms;
-		forum_materialize_profile.system_ms += materialize_delta.system_ms;
-		forum_materialize_profile_calls++;
-	}
-
-	void QueueMaterializedForumBatch(idx_t block_id, ForumChunkBatch batch,
-	                                 const LdbcProfileSample &materialize_delta) {
-		std::lock_guard<std::mutex> lock(pending_forum_chunk_batches_lock);
-		if (LdbcPhaseProfileEnabled()) {
-			forum_materialize_profile.wall_ms += materialize_delta.wall_ms;
-			forum_materialize_profile.user_ms += materialize_delta.user_ms;
-			forum_materialize_profile.system_ms += materialize_delta.system_ms;
-			forum_materialize_profile_calls++;
-		}
 		auto result = pending_forum_chunk_batches.emplace(block_id, std::move(batch));
 		if (!result.second) {
 			throw InternalException("Duplicate materialized forum block %llu",
@@ -2660,7 +1967,7 @@ private:
 		if (!UseDirectPersonParquet() || person_snapshot_builders_initialized) {
 			return;
 		}
-		auto collection_context = LdbcDirectSnapshotCollectionsEnabled() ? &context : nullptr;
+		auto collection_context = &context;
 		person_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person"), collection_context);
 		interest_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_hasInterest_Tag"), collection_context);
 		study_builder = make_uniq<LdbcChunkBuilder>(LdbcRelationTypes("Person_studyAt_University"), collection_context);
@@ -2720,251 +2027,6 @@ private:
 		knows_snapshot_parquet_flushed = true;
 	}
 
-	static vector<LogicalType> DropPartitionColumn(vector<LogicalType> types) {
-		D_ASSERT(!types.empty());
-		types.erase(types.begin());
-		return types;
-	}
-
-	static vector<string> DropPartitionColumn(vector<string> names) {
-		D_ASSERT(!names.empty());
-		names.erase(names.begin());
-		return names;
-	}
-
-	static unique_ptr<DataChunk> SliceUpdateChunkWithoutBatchId(DataChunk &source, const vector<LogicalType> &types,
-	                                                            const SelectionVector &selection, idx_t count) {
-		auto result = make_uniq<DataChunk>();
-		result->Initialize(Allocator::DefaultAllocator(), types);
-		for (idx_t column_idx = 0; column_idx < types.size(); column_idx++) {
-			result->data[column_idx].Slice(source.data[column_idx + 1], selection, count);
-		}
-		result->SetCardinality(count);
-		return result;
-	}
-
-	void WritePartitionedUpdateParquetBlock(idx_t block_id, const string &operation, const string &relation_name,
-	                                        vector<unique_ptr<DataChunk>> &chunks, vector<LogicalType> table_types,
-	                                        vector<string> table_names) {
-		if (chunks.empty()) {
-			return;
-		}
-		auto relation_index = LdbcRelationIndexByName(relation_name);
-		auto &relation = LdbcRelationAt(relation_index);
-		auto file_types = DropPartitionColumn(std::move(table_types));
-		auto file_names = DropPartitionColumn(std::move(table_names));
-		std::map<int32_t, vector<unique_ptr<DataChunk>>> partition_chunks;
-		for (auto &chunk : chunks) {
-			chunk->Flatten();
-			auto dates = FlatVector::GetData<date_t>(chunk->data[0]);
-			std::map<int32_t, vector<sel_t>> rows_by_partition;
-			for (idx_t row_idx = 0; row_idx < chunk->size(); row_idx++) {
-				rows_by_partition[dates[row_idx].days].push_back(static_cast<sel_t>(row_idx));
-			}
-			for (auto &entry : rows_by_partition) {
-				SelectionVector selection(entry.second.size());
-				for (idx_t selection_idx = 0; selection_idx < entry.second.size(); selection_idx++) {
-					selection.set_index(selection_idx, entry.second[selection_idx]);
-				}
-				partition_chunks[entry.first].push_back(
-				    SliceUpdateChunkWithoutBatchId(*chunk, file_types, selection, entry.second.size()));
-			}
-		}
-		for (auto &entry : partition_chunks) {
-			auto partition_value = Date::ToString(date_t(entry.first));
-			auto path = LdbcSparkRelationPartitionBlockPartPath(context, bind_data, operation, relation,
-			                                                    partition_value, block_id);
-			WriteLdbcChunksToParquet(context, path, file_types, file_names, entry.second);
-		}
-		chunks.clear();
-		chunks.shrink_to_fit();
-	}
-
-	void WriteInsertParquetBlock(idx_t block_id, const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
-		WritePartitionedUpdateParquetBlock(block_id, "inserts", relation_name, chunks, ForumInsertTypes(relation_name),
-		                                   LdbcInsertColumnNames(relation_name));
-	}
-
-	void WriteDeleteParquetBlock(idx_t block_id, const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
-		WritePartitionedUpdateParquetBlock(block_id, "deletes", relation_name, chunks, ForumDeleteTypes(relation_name),
-		                                   LdbcDeleteColumnNames(relation_name));
-	}
-
-	void WriteUpdateParquetRelation(idx_t block_id, const string &operation, const string &relation_name,
-	                                vector<unique_ptr<DataChunk>> &chunks) {
-		if (operation == "inserts") {
-			WriteInsertParquetBlock(block_id, relation_name, chunks);
-		} else if (operation == "deletes") {
-			WriteDeleteParquetBlock(block_id, relation_name, chunks);
-		} else {
-			throw InternalException("Unexpected LDBC update operation: %s", operation);
-		}
-	}
-
-	void WriteForumUpdateParquetBlock(idx_t block_id, ForumChunkBatch &batch) {
-		if (!bind_data.emit_updates) {
-			return;
-		}
-		WriteInsertParquetBlock(block_id, "Forum", batch.insert_forums);
-		WriteInsertParquetBlock(block_id, "Forum_hasTag_Tag", batch.insert_forum_tags);
-		WriteInsertParquetBlock(block_id, "Forum_hasMember_Person", batch.insert_forum_members);
-		WriteInsertParquetBlock(block_id, "Post", batch.insert_posts);
-		WriteInsertParquetBlock(block_id, "Post_hasTag_Tag", batch.insert_post_tags);
-		WriteInsertParquetBlock(block_id, "Comment", batch.insert_comments);
-		WriteInsertParquetBlock(block_id, "Comment_hasTag_Tag", batch.insert_comment_tags);
-		WriteInsertParquetBlock(block_id, "Person_likes_Post", batch.insert_post_likes);
-		WriteInsertParquetBlock(block_id, "Person_likes_Comment", batch.insert_comment_likes);
-		WriteDeleteParquetBlock(block_id, "Forum", batch.delete_forums);
-		WriteDeleteParquetBlock(block_id, "Forum_hasMember_Person", batch.delete_forum_members);
-		WriteDeleteParquetBlock(block_id, "Post", batch.delete_posts);
-		WriteDeleteParquetBlock(block_id, "Comment", batch.delete_comments);
-		WriteDeleteParquetBlock(block_id, "Person_likes_Post", batch.delete_post_likes);
-		WriteDeleteParquetBlock(block_id, "Person_likes_Comment", batch.delete_comment_likes);
-	}
-
-	static void MoveChunks(vector<unique_ptr<DataChunk>> &target, vector<unique_ptr<DataChunk>> &source) {
-		if (source.empty()) {
-			return;
-		}
-		target.reserve(target.size() + source.size());
-		for (auto &chunk : source) {
-			target.push_back(std::move(chunk));
-		}
-		source.clear();
-	}
-
-	void CollectForumUpdateChunks(ForumChunkBatch &batch) {
-		MoveChunks(pending_forum_update_batch.insert_forums, batch.insert_forums);
-		MoveChunks(pending_forum_update_batch.insert_forum_tags, batch.insert_forum_tags);
-		MoveChunks(pending_forum_update_batch.insert_forum_members, batch.insert_forum_members);
-		MoveChunks(pending_forum_update_batch.insert_posts, batch.insert_posts);
-		MoveChunks(pending_forum_update_batch.insert_post_tags, batch.insert_post_tags);
-		MoveChunks(pending_forum_update_batch.insert_comments, batch.insert_comments);
-		MoveChunks(pending_forum_update_batch.insert_comment_tags, batch.insert_comment_tags);
-		MoveChunks(pending_forum_update_batch.insert_post_likes, batch.insert_post_likes);
-		MoveChunks(pending_forum_update_batch.insert_comment_likes, batch.insert_comment_likes);
-		MoveChunks(pending_forum_update_batch.delete_forums, batch.delete_forums);
-		MoveChunks(pending_forum_update_batch.delete_forum_members, batch.delete_forum_members);
-		MoveChunks(pending_forum_update_batch.delete_posts, batch.delete_posts);
-		MoveChunks(pending_forum_update_batch.delete_comments, batch.delete_comments);
-		MoveChunks(pending_forum_update_batch.delete_post_likes, batch.delete_post_likes);
-		MoveChunks(pending_forum_update_batch.delete_comment_likes, batch.delete_comment_likes);
-	}
-
-	class LdbcForumUpdateParquetTask : public BaseExecutorTask {
-	public:
-		LdbcForumUpdateParquetTask(TaskExecutor &executor, LdbcLoadGenerator &loader, idx_t block_id, string operation,
-		                           string relation_name, vector<unique_ptr<DataChunk>> &chunks)
-		    : BaseExecutorTask(executor), loader(loader), block_id(block_id), operation(std::move(operation)),
-		      relation_name(std::move(relation_name)), chunks(chunks) {
-		}
-
-		void ExecuteTask() override {
-			loader.WriteUpdateParquetRelation(block_id, operation, relation_name, chunks);
-		}
-
-		string TaskType() const override {
-			return "LdbcForumUpdateParquetTask";
-		}
-
-	private:
-		LdbcLoadGenerator &loader;
-		idx_t block_id;
-		string operation;
-		string relation_name;
-		vector<unique_ptr<DataChunk>> &chunks;
-	};
-
-	void ScheduleUpdateParquetTask(TaskExecutor &executor, idx_t block_id, const string &operation,
-	                               const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
-		if (chunks.empty()) {
-			return;
-		}
-		executor.ScheduleTask(
-		    make_uniq<LdbcForumUpdateParquetTask>(executor, *this, block_id, operation, relation_name, chunks));
-	}
-
-	void WriteForumUpdateParquetBlockParallel(idx_t block_id, ForumChunkBatch &batch) {
-		if (!bind_data.emit_updates) {
-			return;
-		}
-		TaskExecutor executor(context);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum", batch.insert_forums);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum_hasTag_Tag", batch.insert_forum_tags);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Forum_hasMember_Person", batch.insert_forum_members);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Post", batch.insert_posts);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Post_hasTag_Tag", batch.insert_post_tags);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Comment", batch.insert_comments);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Comment_hasTag_Tag", batch.insert_comment_tags);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Person_likes_Post", batch.insert_post_likes);
-		ScheduleUpdateParquetTask(executor, block_id, "inserts", "Person_likes_Comment", batch.insert_comment_likes);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Forum", batch.delete_forums);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Forum_hasMember_Person", batch.delete_forum_members);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Post", batch.delete_posts);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Comment", batch.delete_comments);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Person_likes_Post", batch.delete_post_likes);
-		ScheduleUpdateParquetTask(executor, block_id, "deletes", "Person_likes_Comment", batch.delete_comment_likes);
-		executor.WorkOnTasks();
-	}
-
-	void FlushForumUpdateParquet() {
-		if (!UseDirectForumUpdateParquet() || forum_update_parquet_flushed) {
-			return;
-		}
-		auto append_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
-		WriteForumUpdateParquetBlockParallel(0, pending_forum_update_batch);
-		forum_update_parquet_flushed = true;
-		if (LdbcPhaseProfileEnabled()) {
-			auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), append_start);
-			if (delta.wall_ms > 0) {
-				forum_append_chunks_profile.wall_ms += delta.wall_ms;
-				forum_append_chunks_profile.user_ms += delta.user_ms;
-				forum_append_chunks_profile.system_ms += delta.system_ms;
-				forum_append_chunks_profile_calls++;
-			}
-		}
-	}
-
-	static void RegisterUpdateChunks(LdbcForumUpdateChunkRegistryEntry &entry, const string &operation,
-	                                 const string &relation_name, vector<unique_ptr<DataChunk>> &chunks) {
-		if (chunks.empty()) {
-			return;
-		}
-		entry.chunks[operation + ":" + relation_name] = std::move(chunks);
-	}
-
-	void RegisterForumUpdateChunks() {
-		if (!UseForumUpdateCopyTableFunction() || forum_update_chunks_registered) {
-			return;
-		}
-		if (bind_data.forum_update_chunk_token.empty()) {
-			throw InternalException("Missing LDBC forum update chunk token");
-		}
-		auto entry = make_shared_ptr<LdbcForumUpdateChunkRegistryEntry>();
-		RegisterUpdateChunks(*entry, "inserts", "Forum", pending_forum_update_batch.insert_forums);
-		RegisterUpdateChunks(*entry, "inserts", "Forum_hasTag_Tag", pending_forum_update_batch.insert_forum_tags);
-		RegisterUpdateChunks(*entry, "inserts", "Forum_hasMember_Person",
-		                     pending_forum_update_batch.insert_forum_members);
-		RegisterUpdateChunks(*entry, "inserts", "Post", pending_forum_update_batch.insert_posts);
-		RegisterUpdateChunks(*entry, "inserts", "Post_hasTag_Tag", pending_forum_update_batch.insert_post_tags);
-		RegisterUpdateChunks(*entry, "inserts", "Comment", pending_forum_update_batch.insert_comments);
-		RegisterUpdateChunks(*entry, "inserts", "Comment_hasTag_Tag", pending_forum_update_batch.insert_comment_tags);
-		RegisterUpdateChunks(*entry, "inserts", "Person_likes_Post", pending_forum_update_batch.insert_post_likes);
-		RegisterUpdateChunks(*entry, "inserts", "Person_likes_Comment",
-		                     pending_forum_update_batch.insert_comment_likes);
-		RegisterUpdateChunks(*entry, "deletes", "Forum", pending_forum_update_batch.delete_forums);
-		RegisterUpdateChunks(*entry, "deletes", "Forum_hasMember_Person",
-		                     pending_forum_update_batch.delete_forum_members);
-		RegisterUpdateChunks(*entry, "deletes", "Post", pending_forum_update_batch.delete_posts);
-		RegisterUpdateChunks(*entry, "deletes", "Comment", pending_forum_update_batch.delete_comments);
-		RegisterUpdateChunks(*entry, "deletes", "Person_likes_Post", pending_forum_update_batch.delete_post_likes);
-		RegisterUpdateChunks(*entry, "deletes", "Person_likes_Comment",
-		                     pending_forum_update_batch.delete_comment_likes);
-		std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
-		ldbc_forum_update_chunk_registry[bind_data.forum_update_chunk_token] = std::move(entry);
-		forum_update_chunks_registered = true;
-	}
-
 	void AppendChunks(LdbcChunkAppender &appender, vector<unique_ptr<DataChunk>> &chunks) {
 		for (auto &chunk : chunks) {
 			appender.AppendChunk(*chunk);
@@ -3003,9 +2065,7 @@ private:
 		AppendChunks(*comment_tag_appender, batch.comment_tags);
 		AppendChunks(*post_like_appender, batch.post_likes);
 		AppendChunks(*comment_like_appender, batch.comment_likes);
-		if (UseDirectForumUpdateParquet() || UseForumUpdateCopyTableFunction()) {
-			CollectForumUpdateChunks(batch);
-		} else if (bind_data.emit_updates) {
+		if (bind_data.emit_updates) {
 			AppendInsertChunks("Forum", batch.insert_forums);
 			AppendInsertChunks("Forum_hasTag_Tag", batch.insert_forum_tags);
 			AppendInsertChunks("Forum_hasMember_Person", batch.insert_forum_members);
@@ -3034,7 +2094,6 @@ private:
 	}
 
 	void DrainForumChunkBatches() {
-		auto append_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
 		while (true) {
 			ForumChunkBatch batch;
 			{
@@ -3049,15 +2108,6 @@ private:
 			}
 			AppendForumChunkBatch(batch);
 		}
-		if (LdbcPhaseProfileEnabled()) {
-			auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), append_start);
-			if (delta.wall_ms > 0) {
-				forum_append_chunks_profile.wall_ms += delta.wall_ms;
-				forum_append_chunks_profile.user_ms += delta.user_ms;
-				forum_append_chunks_profile.system_ms += delta.system_ms;
-				forum_append_chunks_profile_calls++;
-			}
-		}
 	}
 
 	void EnsureDynamicState() {
@@ -3071,8 +2121,6 @@ private:
 		    dates->SimulationEnd() -
 		    static_cast<int64_t>(static_cast<double>(dates->SimulationEnd() - dates->SimulationStart()) *
 		                         (1.0 - config->bulkload_portion));
-		chunk_message_appenders = std::getenv("LDBCGEN_ROW_MESSAGES") == nullptr;
-
 		person_appender = MakeStaticAppender(context, bind_data, "Person");
 		interest_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Person_hasInterest_Tag"),
@@ -3089,19 +2137,11 @@ private:
 		forum_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Forum_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
-		if (chunk_message_appenders) {
-			post_chunk_appender = MakePostAppender(context, bind_data);
-		} else {
-			post_appender = MakeStaticAppender(context, bind_data, "Post");
-		}
+		post_chunk_appender = MakePostAppender(context, bind_data);
 		post_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Post_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
-		if (chunk_message_appenders) {
-			comment_chunk_appender = MakeCommentAppender(context, bind_data);
-		} else {
-			comment_appender = MakeStaticAppender(context, bind_data, "Comment");
-		}
+		comment_chunk_appender = MakeCommentAppender(context, bind_data);
 		comment_tag_appender = make_uniq<LdbcChunkAppender>(
 		    MakeStaticAppender(context, bind_data, "Comment_hasTag_Tag"),
 		    vector<LogicalType> {LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::INTEGER});
@@ -3147,32 +2187,15 @@ private:
 	}
 
 	void LoadStatic() {
-		LdbcProfileTimer timer("populate.static.total");
-		StaticDictionaryData data;
-		{
-			LdbcProfileTimer phase_timer("load.static_dictionaries");
-			data = LoadStaticDictionaryData(bind_data);
-		}
+		auto data = LoadStaticDictionaryData(bind_data);
 		SetLdbcGenProgress(&progress_state, 4.0);
-		{
-			LdbcProfileTimer phase_timer("append.static.Place");
-			row_counts["Place"] = AppendPlaces(context, bind_data, data);
-		}
+		row_counts["Place"] = AppendPlaces(context, bind_data, data);
 		SetLdbcGenProgress(&progress_state, 8.0);
-		{
-			LdbcProfileTimer phase_timer("append.static.TagClass");
-			row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
-		}
+		row_counts["TagClass"] = AppendTagClasses(context, bind_data, data);
 		SetLdbcGenProgress(&progress_state, 12.0);
-		{
-			LdbcProfileTimer phase_timer("append.static.Tag");
-			row_counts["Tag"] = AppendTags(context, bind_data, data);
-		}
+		row_counts["Tag"] = AppendTags(context, bind_data, data);
 		SetLdbcGenProgress(&progress_state, 16.0);
-		{
-			LdbcProfileTimer phase_timer("append.static.Organisation");
-			row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
-		}
+		row_counts["Organisation"] = AppendOrganisations(context, bind_data, data);
 		SetLdbcGenProgress(&progress_state, 20.0);
 	}
 
@@ -3182,7 +2205,6 @@ private:
 			persons.resize(NumericCast<idx_t>(config->num_persons));
 			persons_initialized = true;
 		}
-		LdbcProfileTimer timer("generate.persons");
 		auto block_size = NumericCast<idx_t>(config->block_size);
 		auto total_blocks = (persons.size() + block_size - 1) / block_size;
 		auto worker_count = MinValue<idx_t>(bind_data.threads, MaxValue<idx_t>(total_blocks - person_next_block, 1));
@@ -3421,7 +2443,6 @@ private:
 	bool AppendPersons() {
 		EnsurePersonSnapshotBuilders();
 		static constexpr idx_t PERSON_BATCH_SIZE = 256;
-		LdbcProfileTimer timer("append.person_owned.batch");
 		idx_t end = std::min<idx_t>(persons.size(), person_idx + PERSON_BATCH_SIZE);
 		for (; person_idx < end; person_idx++) {
 			auto &person = persons[person_idx];
@@ -3507,7 +2528,6 @@ private:
 		if (!knows_generator) {
 			knows_generator = make_uniq<LdbcKnowsGenerator>(*config, persons, bind_data.threads, &context);
 		}
-		LdbcProfileTimer timer("generate.knows");
 		auto done = knows_generator->GenerateNext(MaxValue<idx_t>(4, bind_data.threads));
 		SetLdbcGenProgress(&progress_state,
 		                   LdbcGenProgressRange(45.0, 55.0, static_cast<idx_t>(knows_generator->Progress()), 100));
@@ -3523,7 +2543,6 @@ private:
 	bool AppendKnows() {
 		EnsurePersonSnapshotBuilders();
 		static constexpr idx_t KNOWS_BATCH_SIZE = 8192;
-		LdbcProfileTimer timer("append.knows.batch");
 		idx_t end = std::min<idx_t>(knows_edges.size(), knows_idx + KNOWS_BATCH_SIZE);
 		for (; knows_idx < end; knows_idx++) {
 			auto &edge = knows_edges[knows_idx];
@@ -3550,23 +2569,11 @@ private:
 
 	bool GenerateForums() {
 		if (!forum_generator) {
-			LdbcProfileTimer timer("generate.forums.init");
 			std::function<void(LdbcForum && forum)> append_forum;
 			auto use_prematerialized_chunks = UsePrematerializedForumChunks();
 			auto use_block_prematerialization = UseForumBlockPrematerialization();
 			LdbcForumGenerator::BlockCallback block_callback;
 			LdbcForumGenerator::SliceCallback slice_callback;
-			if (LdbcPhaseProfileEnabled()) {
-				std::cerr << "[ldbcgen] forum.prematerialize_chunks: "
-				          << (use_prematerialized_chunks ? "true" : "false")
-				          << " block_materialize=" << (use_block_prematerialization ? "true" : "false")
-				          << " direct_forum_parquet=" << (UseDirectForumParquet() ? "true" : "false")
-				          << " direct_forum_update_parquet=" << (UseDirectForumUpdateParquet() ? "true" : "false")
-				          << " forum_update_copy_table_function="
-				          << (UseForumUpdateCopyTableFunction() ? "true" : "false")
-				          << " emit_updates=" << (bind_data.emit_updates ? "true" : "false")
-				          << " chunk_message_appenders=" << (chunk_message_appenders ? "true" : "false") << "\n";
-			}
 			if (!use_prematerialized_chunks) {
 				append_forum = [&](LdbcForum &&forum) {
 					AppendForum(forum);
@@ -3588,48 +2595,27 @@ private:
 			    },
 			    bind_data.threads, &context, block_callback, slice_callback);
 		}
-		LdbcProfileTimer timer("generate.forums.batch");
 		auto done = forum_generator->GenerateNext(8);
 		if (UseForumBlockPrematerialization()) {
 			DrainForumChunkBatches();
 		} else if (UsePrematerializedForumChunks()) {
 			auto forums = forum_generator->ReleaseForums();
-			auto materialize_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
 			auto batches = MaterializeForumChunks(forums);
-			if (LdbcPhaseProfileEnabled()) {
-				auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), materialize_start);
-				forum_materialize_profile.wall_ms += delta.wall_ms;
-				forum_materialize_profile.user_ms += delta.user_ms;
-				forum_materialize_profile.system_ms += delta.system_ms;
-				forum_materialize_profile_calls++;
-			}
-			auto append_start = LdbcPhaseProfileEnabled() ? LdbcProfileSampleNow() : LdbcProfileSample();
 			for (auto &batch : batches) {
 				AppendForumChunkBatch(batch);
-			}
-			if (LdbcPhaseProfileEnabled()) {
-				auto delta = LdbcProfileSampleDelta(LdbcProfileSampleNow(), append_start);
-				forum_append_chunks_profile.wall_ms += delta.wall_ms;
-				forum_append_chunks_profile.user_ms += delta.user_ms;
-				forum_append_chunks_profile.system_ms += delta.system_ms;
-				forum_append_chunks_profile_calls++;
 			}
 		}
 		if (done) {
 			if (UseForumBlockPrematerialization()) {
 				DrainForumChunkBatches();
 			}
-			FlushForumUpdateParquet();
-			RegisterForumUpdateChunks();
 			SetLdbcGenProgress(&progress_state, 98.0);
 		}
 		return done;
 	}
 
 	void AppendForum(const LdbcForum &forum) {
-		LdbcScopedForumAppendProfile profile(*this);
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::FORUM);
 			if (IsSnapshotRow(forum.creation_date)) {
 				AppendForumRow(*forum_appender, forum);
 				person_counts.forums++;
@@ -3648,7 +2634,6 @@ private:
 			}
 		}
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::MEMBERSHIPS);
 			for (auto &membership : forum.memberships) {
 				if (IsSnapshotRow(membership.creation_date)) {
 					AppendTimestampMsInt64Int64Row(*forum_member_appender, membership.creation_date,
@@ -3665,29 +2650,9 @@ private:
 			}
 		}
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::POSTS);
 			for (auto &post : forum.posts) {
 				if (IsSnapshotRow(post.creation_date)) {
-					if (chunk_message_appenders) {
-						AppendPostRow(*post_chunk_appender, post);
-					} else {
-						post_appender->BeginRow();
-						post_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(post.creation_date)));
-						post_appender->Append<int64_t>(post.id);
-						post_appender->Append(post.image_file.empty() ? Value(LogicalType::VARCHAR)
-						                                              : Value(post.image_file));
-						post_appender->Append(Value(post.location_ip));
-						post_appender->Append(Value(post.browser_used));
-						post_appender->Append(post.language.empty() ? Value(LogicalType::VARCHAR)
-						                                            : Value(post.language));
-						post_appender->Append(post.image_file.empty() ? Value(post.content)
-						                                              : Value(LogicalType::VARCHAR));
-						post_appender->Append<int32_t>(post.length);
-						post_appender->Append<int64_t>(post.creator_person_id);
-						post_appender->Append<int64_t>(post.forum_id);
-						post_appender->Append<int64_t>(post.location_country_id);
-						post_appender->EndRow();
-					}
+					AppendPostRow(*post_chunk_appender, post);
 					person_counts.posts++;
 					for (auto tag_id : post.tags) {
 						AppendTimestampMsInt64Int32Row(*post_tag_appender, post.creation_date, post.id, tag_id);
@@ -3705,28 +2670,9 @@ private:
 			}
 		}
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::COMMENTS);
 			for (auto &comment : forum.comments) {
 				if (IsSnapshotRow(comment.creation_date)) {
-					if (chunk_message_appenders) {
-						AppendCommentRow(*comment_chunk_appender, comment);
-					} else {
-						comment_appender->BeginRow();
-						comment_appender->Append(Value::TIMESTAMP(LdbcTimestampMs(comment.creation_date)));
-						comment_appender->Append<int64_t>(comment.id);
-						comment_appender->Append(Value(comment.location_ip));
-						comment_appender->Append(Value(comment.browser_used));
-						comment_appender->Append(Value(comment.content));
-						comment_appender->Append<int32_t>(comment.length);
-						comment_appender->Append<int64_t>(comment.creator_person_id);
-						comment_appender->Append<int64_t>(comment.location_country_id);
-						comment_appender->Append(comment.parent_post_id == -1 ? Value(LogicalType::BIGINT)
-						                                                      : Value::BIGINT(comment.parent_post_id));
-						comment_appender->Append(comment.parent_comment_id == -1
-						                             ? Value(LogicalType::BIGINT)
-						                             : Value::BIGINT(comment.parent_comment_id));
-						comment_appender->EndRow();
-					}
+					AppendCommentRow(*comment_chunk_appender, comment);
 					person_counts.comments++;
 					for (auto tag_id : comment.tags) {
 						AppendTimestampMsInt64Int32Row(*comment_tag_appender, comment.creation_date, comment.id,
@@ -3746,7 +2692,6 @@ private:
 			}
 		}
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::POST_LIKES);
 			for (auto &like : forum.post_likes) {
 				if (IsSnapshotRow(like.creation_date)) {
 					AppendTimestampMsInt64Int64Row(*post_like_appender, like.creation_date, like.person_id,
@@ -3762,7 +2707,6 @@ private:
 			}
 		}
 		{
-			LdbcScopedForumAppendPartProfile part_profile(*this, ForumAppendPart::COMMENT_LIKES);
 			for (auto &like : forum.comment_likes) {
 				if (IsSnapshotRow(like.creation_date)) {
 					AppendTimestampMsInt64Int64Row(*comment_like_appender, like.creation_date, like.person_id,
@@ -3788,17 +2732,9 @@ private:
 		forum_appender->Close();
 		forum_member_appender->Close();
 		forum_tag_appender->Close();
-		if (chunk_message_appenders) {
-			post_chunk_appender->Close();
-		} else {
-			post_appender->Close();
-		}
+		post_chunk_appender->Close();
 		post_tag_appender->Close();
-		if (chunk_message_appenders) {
-			comment_chunk_appender->Close();
-		} else {
-			comment_appender->Close();
-		}
+		comment_chunk_appender->Close();
 		comment_tag_appender->Close();
 		post_like_appender->Close();
 		comment_like_appender->Close();
@@ -3835,16 +2771,6 @@ private:
 	LdbcGenBindData bind_data;
 	LdbcGenGlobalState &progress_state;
 	Phase phase = Phase::LOAD_STATIC;
-	std::array<LdbcProfileSample, PHASE_COUNT> phase_profiles {};
-	std::array<idx_t, PHASE_COUNT> phase_profile_calls {};
-	LdbcProfileSample forum_append_profile;
-	idx_t forum_append_profile_calls = 0;
-	LdbcProfileSample forum_materialize_profile;
-	idx_t forum_materialize_profile_calls = 0;
-	LdbcProfileSample forum_append_chunks_profile;
-	idx_t forum_append_chunks_profile_calls = 0;
-	std::array<double, FORUM_APPEND_PART_COUNT> forum_append_part_ms {};
-	std::array<idx_t, FORUM_APPEND_PART_COUNT> forum_append_part_calls {};
 	unordered_map<string, idx_t> row_counts;
 	PersonOwnedRowCounts person_counts;
 	unique_ptr<LdbcDatagenConfig> config;
@@ -3863,9 +2789,6 @@ private:
 	std::mutex pending_forum_chunk_batches_lock;
 	unordered_map<idx_t, ForumChunkBatch> pending_forum_chunk_batches;
 	idx_t next_forum_chunk_block = 0;
-	ForumChunkBatch pending_forum_update_batch;
-	bool forum_update_parquet_flushed = false;
-	bool forum_update_chunks_registered = false;
 	unique_ptr<LdbcChunkBuilder> person_builder;
 	unique_ptr<LdbcChunkBuilder> interest_builder;
 	unique_ptr<LdbcChunkBuilder> study_builder;
@@ -3883,11 +2806,8 @@ private:
 	unique_ptr<LdbcChunkAppender> forum_appender;
 	unique_ptr<LdbcChunkAppender> forum_member_appender;
 	unique_ptr<LdbcChunkAppender> forum_tag_appender;
-	bool chunk_message_appenders = false;
-	unique_ptr<InternalAppender> post_appender;
 	unique_ptr<LdbcChunkAppender> post_chunk_appender;
 	unique_ptr<LdbcChunkAppender> post_tag_appender;
-	unique_ptr<InternalAppender> comment_appender;
 	unique_ptr<LdbcChunkAppender> comment_chunk_appender;
 	unique_ptr<LdbcChunkAppender> comment_tag_appender;
 	unique_ptr<LdbcChunkAppender> post_like_appender;
@@ -3973,19 +2893,6 @@ static string LdbcSparkRelationBlockPartPath(ClientContext &context, const LdbcG
 	return fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation), part_name.str());
 }
 
-static string LdbcSparkRelationPartitionBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
-                                                      const string &operation, const LdbcSchemaColumn &relation,
-                                                      const string &partition_value, idx_t block_id) {
-	auto &fs = FileSystem::GetFileSystem(context);
-	auto extension = bind_data.format == "parquet" ? "parquet" : "csv";
-	auto partition_dir =
-	    fs.JoinPath(LdbcSparkRelationDir(context, bind_data, operation, relation), "batch_id=" + partition_value);
-	fs.CreateDirectoriesRecursive(partition_dir);
-	std::ostringstream part_name;
-	part_name << "part-" << std::setw(5) << std::setfill('0') << block_id << "." << extension;
-	return fs.JoinPath(partition_dir, part_name.str());
-}
-
 static idx_t LdbcRelationIndexByName(const string &relation_name) {
 	for (idx_t relation_index = 0; relation_index < LdbcRelationCount(); relation_index++) {
 		if (relation_name == LdbcRelationAt(relation_index).relation_name) {
@@ -4021,43 +2928,6 @@ static vector<LogicalType> LdbcRelationTypes(const string &relation_name) {
 		throw InternalException("Unknown LDBC relation %s", relation_name);
 	}
 	return types;
-}
-
-static vector<LogicalType> LdbcInsertTypes(const string &relation_name) {
-	auto types = LdbcRelationTypes(relation_name);
-	types.insert(types.begin(), LogicalType::DATE);
-	return types;
-}
-
-static vector<string> LdbcInsertColumnNames(const string &relation_name) {
-	auto names = LdbcRelationColumnNames(relation_name);
-	names.insert(names.begin(), "batch_id");
-	return names;
-}
-
-static vector<LogicalType> LdbcDeleteTypes(const string &relation_name) {
-	vector<LogicalType> types {LogicalType::DATE, LogicalType::TIMESTAMP_MS};
-	auto relation_index = LdbcRelationIndexByName(relation_name);
-	for (auto &key : SplitByDelimiter(LdbcRelationAt(relation_index).primary_key, ",")) {
-		auto names = LdbcRelationColumnNames(relation_name);
-		auto relation_types = LdbcRelationTypes(relation_name);
-		for (idx_t column_idx = 0; column_idx < names.size(); column_idx++) {
-			if (names[column_idx] == key) {
-				types.push_back(relation_types[column_idx]);
-				break;
-			}
-		}
-	}
-	return types;
-}
-
-static vector<string> LdbcDeleteColumnNames(const string &relation_name) {
-	vector<string> names {"batch_id", "deletionDate"};
-	auto relation_index = LdbcRelationIndexByName(relation_name);
-	for (auto &key : SplitByDelimiter(LdbcRelationAt(relation_index).primary_key, ",")) {
-		names.push_back(key);
-	}
-	return names;
 }
 
 static bool LdbcDirectForumParquetRelation(const string &relation_name) {
@@ -4272,10 +3142,6 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 		auto direct_snapshot_relation =
 		    (bind_data.direct_forum_parquet && LdbcDirectForumParquetRelation(relation_name)) ||
 		    (bind_data.direct_person_parquet && LdbcDirectPersonParquetRelation(relation_name));
-		auto direct_forum_updates =
-		    bind_data.direct_forum_update_parquet && LdbcDirectForumParquetRelation(relation_name);
-		auto copy_forum_update_chunks =
-		    bind_data.forum_update_copy_table_function && LdbcDirectForumParquetRelation(relation_name);
 		auto output_path = direct_snapshot_relation
 		                       ? LdbcSparkRelationDir(context, bind_data, "initial_snapshot", relation)
 		                       : LdbcRelationOutputPath(context, bind_data, relation_index);
@@ -4289,52 +3155,28 @@ static unordered_map<string, string> CopyLdbcTablesToFiles(ClientContext &contex
 			      SQLString::ToString(spark_snapshot_path) + " (" + overwrite_options + ")";
 			ExecuteLdbcSQL(context, sql);
 		}
-		if (bind_data.emit_updates && string(relation.kind) != "static_node" && !direct_forum_updates) {
+		if (bind_data.emit_updates && string(relation.kind) != "static_node") {
 			auto insert_path = LdbcSparkRelationDir(context, bind_data, "inserts", relation);
 			string insert_options = copy_options + ", PARTITION_BY (batch_id)";
 			if (bind_data.overwrite) {
 				insert_options += ", OVERWRITE TRUE";
 			}
-			if (copy_forum_update_chunks) {
-				if (HasLdbcForumUpdateChunks(bind_data.forum_update_chunk_token, "inserts", relation_name)) {
-					sql = "COPY (SELECT * FROM ldbcgen_forum_update_chunks(token := " +
-					      SQLString::ToString(bind_data.forum_update_chunk_token) +
-					      ", operation := 'inserts', relation := " + SQLString::ToString(relation_name) + ")) TO " +
-					      SQLString::ToString(insert_path) + " (" + insert_options + ")";
-					ExecuteLdbcProfiledForumUpdateCopy(context, sql, "inserts", relation_name);
-				}
-			} else {
-				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(bind_data, relation_name)) +
-				      " TO " + SQLString::ToString(insert_path) + " (" + insert_options + ")";
-				ExecuteLdbcSQL(context, sql);
-			}
+			sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcInsertTableName(bind_data, relation_name)) + " TO " +
+			      SQLString::ToString(insert_path) + " (" + insert_options + ")";
+			ExecuteLdbcSQL(context, sql);
 			if (LdbcRelationHasDeletes(relation_name)) {
 				auto delete_path = LdbcSparkRelationDir(context, bind_data, "deletes", relation);
 				string delete_options = copy_options + ", PARTITION_BY (batch_id)";
 				if (bind_data.overwrite) {
 					delete_options += ", OVERWRITE TRUE";
 				}
-				if (copy_forum_update_chunks) {
-					if (HasLdbcForumUpdateChunks(bind_data.forum_update_chunk_token, "deletes", relation_name)) {
-						sql = "COPY (SELECT * FROM ldbcgen_forum_update_chunks(token := " +
-						      SQLString::ToString(bind_data.forum_update_chunk_token) +
-						      ", operation := 'deletes', relation := " + SQLString::ToString(relation_name) + ")) TO " +
-						      SQLString::ToString(delete_path) + " (" + delete_options + ")";
-						ExecuteLdbcProfiledForumUpdateCopy(context, sql, "deletes", relation_name);
-					}
-				} else {
-					sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) +
-					      " TO " + SQLString::ToString(delete_path) + " (" + delete_options + ")";
-					ExecuteLdbcSQL(context, sql);
-				}
+				sql = "COPY " + LdbcQualifiedTableName(bind_data, LdbcDeleteTableName(bind_data, relation_name)) +
+				      " TO " + SQLString::ToString(delete_path) + " (" + delete_options + ")";
+				ExecuteLdbcSQL(context, sql);
 			}
 		}
 		output_paths[relation_name] = output_path;
 		SetLdbcGenProgress(progress_state, LdbcGenProgressRange(98.0, 100.0, relation_index + 1, LdbcRelationCount()));
-	}
-	if (!bind_data.forum_update_chunk_token.empty()) {
-		std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
-		ldbc_forum_update_chunk_registry.erase(bind_data.forum_update_chunk_token);
 	}
 	return output_paths;
 }
@@ -4348,7 +3190,6 @@ namespace ldbc {
 
 void LDBCGenWrapper::CreateLDBCSchema(ClientContext &context, string catalog, string schema, bool overwrite,
                                       bool primary_keys) {
-	LdbcProfileTimer timer("create_schema");
 	LdbcGenBindData bind_data;
 	bind_data.catalog = std::move(catalog);
 	bind_data.schema = std::move(schema);
@@ -4421,17 +3262,8 @@ static unique_ptr<FunctionData> LdbcGenBind(ClientContext &context, TableFunctio
 		result->emit_updates = true;
 		result->visible_updates = true;
 	}
-	if (result->target == "files" && result->format == "parquet" &&
-	    std::getenv("LDBCGEN_DIRECT_FORUM_PARQUET") != nullptr) {
+	if (result->target == "files" && result->format == "parquet") {
 		result->direct_forum_parquet = true;
-		if (std::getenv("LDBCGEN_FORUM_UPDATE_COPY_TABLE_FUNCTION") != nullptr) {
-			result->forum_update_copy_table_function = true;
-		} else if (std::getenv("LDBCGEN_DIRECT_FORUM_UPDATE_PARQUET") != nullptr) {
-			result->direct_forum_update_parquet = true;
-		}
-	}
-	if (result->target == "files" && result->format == "parquet" &&
-	    std::getenv("LDBCGEN_DIRECT_PERSON_PARQUET") != nullptr) {
 		result->direct_person_parquet = true;
 	}
 	if (input.binder && result->target == "tables") {
@@ -4482,7 +3314,6 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 	}
 
 	if (bind_data.target == "tables" && !state.schema_created) {
-		LdbcProfileTimer timer("ldbcgen.materialize");
 		SetLdbcGenProgress(&state, 1.0);
 		CreateLdbcTables(context, bind_data);
 		SetLdbcGenProgress(&state, 2.0);
@@ -4531,10 +3362,6 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			state.file_bind_data->overwrite = true;
 			state.file_bind_data->primary_keys = false;
 			state.file_bind_data->emit_updates = true;
-			if (state.file_bind_data->forum_update_copy_table_function) {
-				state.file_bind_data->forum_update_chunk_token =
-				    "__ldbcgen_forum_updates_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
-			}
 			auto &file_context = *state.file_connection->context;
 			if (state.file_bind_data->direct_forum_parquet || state.file_bind_data->direct_person_parquet) {
 				EnsureLdbcOutputDirectories(file_context, *state.file_bind_data);
@@ -4616,64 +3443,6 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 		                   LdbcGenProgressRange(98.0, 100.0, state.offset, ldbc::LDBCGenWrapper::RelationCount()));
 	}
 	output.SetCardinality(count);
-}
-
-static unique_ptr<FunctionData> LdbcForumUpdateChunkBind(ClientContext &context, TableFunctionBindInput &input,
-                                                         vector<LogicalType> &return_types, vector<string> &names) {
-	if (!input.inputs.empty()) {
-		throw BinderException("ldbcgen_forum_update_chunks only accepts named parameters");
-	}
-	auto result = make_uniq<LdbcForumUpdateChunkBindData>();
-	result->token = GetStringParameter(input, "token", "");
-	result->operation = StringUtil::Lower(GetStringParameter(input, "operation", ""));
-	result->relation_name = GetStringParameter(input, "relation", "");
-	if (result->token.empty()) {
-		throw BinderException("ldbcgen_forum_update_chunks parameter token must be set");
-	}
-	if (result->operation != "inserts" && result->operation != "deletes") {
-		throw BinderException("ldbcgen_forum_update_chunks parameter operation must be 'inserts' or 'deletes'");
-	}
-	if (!LdbcDirectForumParquetRelation(result->relation_name)) {
-		throw BinderException("ldbcgen_forum_update_chunks relation must be a forum-generated relation");
-	}
-	if (result->operation == "deletes" && !LdbcRelationHasDeletes(result->relation_name)) {
-		throw BinderException("ldbcgen_forum_update_chunks relation does not have deletes");
-	}
-	if (result->operation == "inserts") {
-		names = LdbcInsertColumnNames(result->relation_name);
-		return_types = LdbcInsertTypes(result->relation_name);
-	} else {
-		names = LdbcDeleteColumnNames(result->relation_name);
-		return_types = LdbcDeleteTypes(result->relation_name);
-	}
-	return std::move(result);
-}
-
-static unique_ptr<GlobalTableFunctionState> LdbcForumUpdateChunkInit(ClientContext &context,
-                                                                     TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->Cast<LdbcForumUpdateChunkBindData>();
-	auto result = make_uniq<LdbcForumUpdateChunkGlobalState>();
-	auto chunk_key = bind_data.operation + ":" + bind_data.relation_name;
-	std::lock_guard<std::mutex> lock(ldbc_forum_update_chunk_registry_lock);
-	auto token_entry = ldbc_forum_update_chunk_registry.find(bind_data.token);
-	if (token_entry == ldbc_forum_update_chunk_registry.end()) {
-		throw InvalidInputException("Unknown LDBC forum update chunk token: %s", bind_data.token);
-	}
-	auto chunk_entry = token_entry->second->chunks.find(chunk_key);
-	if (chunk_entry != token_entry->second->chunks.end()) {
-		result->chunks = std::move(chunk_entry->second);
-		token_entry->second->chunks.erase(chunk_entry);
-	}
-	return result;
-}
-
-static void LdbcForumUpdateChunkFunction(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &state = data_p.global_state->Cast<LdbcForumUpdateChunkGlobalState>();
-	auto offset = state.offset.fetch_add(1);
-	if (offset >= state.chunks.size()) {
-		return;
-	}
-	output.Reference(*state.chunks[offset]);
 }
 
 static unique_ptr<FunctionData> LdbcGenSchemaBind(ClientContext &context, TableFunctionBindInput &input,
@@ -5198,13 +3967,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 	TableFunction ldbcgen_schema("ldbcgen_schema", {}, LdbcGenSchemaFunction, LdbcGenSchemaBind, LdbcGenSchemaInit);
 	ldbcgen_schema.named_parameters["format"] = LogicalType::VARCHAR;
 	loader.RegisterFunction(ldbcgen_schema);
-
-	TableFunction ldbcgen_forum_update_chunks("ldbcgen_forum_update_chunks", {}, LdbcForumUpdateChunkFunction,
-	                                          LdbcForumUpdateChunkBind, LdbcForumUpdateChunkInit);
-	ldbcgen_forum_update_chunks.named_parameters["token"] = LogicalType::VARCHAR;
-	ldbcgen_forum_update_chunks.named_parameters["operation"] = LogicalType::VARCHAR;
-	ldbcgen_forum_update_chunks.named_parameters["relation"] = LogicalType::VARCHAR;
-	loader.RegisterFunction(ldbcgen_forum_update_chunks);
 
 	TableFunction ldbcgen_config("ldbcgen_config", {}, LdbcGenConfigFunction, LdbcGenConfigBind, LdbcGenConfigInit);
 	ldbcgen_config.named_parameters["sf"] = LogicalType::DOUBLE;
