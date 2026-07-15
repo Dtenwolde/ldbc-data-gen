@@ -232,8 +232,8 @@ int64_t LdbcDateGenerator::RandomClassYear(LdbcJavaRandom &random, int64_t birth
 
 int64_t LdbcDateGenerator::GetWorkFromYear(LdbcJavaRandom &random, int64_t class_year, int64_t birthday) const {
 	if (class_year == -1) {
-		auto working_age = 18LL * ONE_YEAR_MS;
-		auto from = birthday + working_age;
+		const int64_t working_age = 18 * ONE_YEAR_MS;
+		const int64_t from = birthday + working_age;
 		return std::min(static_cast<int64_t>(random.NextDouble() * static_cast<double>(simulation_end - from)) + from,
 		                simulation_end);
 	}
@@ -1191,9 +1191,9 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 	for (int32_t like_idx = 0; like_idx < like_count; like_idx++) {
 		auto &membership = memberships[NumericCast<idx_t>(start_index + like_idx)];
 		auto min_creation = std::max(membership.person->creation_date, message.creation_date) + config.delta;
-		auto max_creation = std::min(
-		    std::min(message.creation_date + 7LL * LdbcDateGenerator::ONE_DAY_MS, membership.person->deletion_date),
-		    std::min(message.deletion_date, dates.SimulationEnd()));
+		const int64_t latest_creation = message.creation_date + 7 * LdbcDateGenerator::ONE_DAY_MS;
+		auto max_creation = std::min(std::min(latest_creation, membership.person->deletion_date),
+		                             std::min(message.deletion_date, dates.SimulationEnd()));
 		if (max_creation <= min_creation) {
 			continue;
 		}
