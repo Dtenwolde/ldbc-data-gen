@@ -1985,26 +1985,64 @@ struct LdbcForumGenerator::Impl {
 	bool GenerateNextParallel(idx_t max_persons) {
 		auto block_size = NumericCast<idx_t>(config.block_size);
 		auto total_blocks = (random_ranked_persons.size() + block_size - 1) / block_size;
+		if (UseForumSliceReplay()) {
+			return GenerateNextParallelSlices(total_blocks, block_size);
+		}
+		return GenerateNextParallelBlocks(total_blocks, block_size);
+	}
+
+	bool GenerateNextParallelBlocks(idx_t total_blocks, idx_t block_size) {
+		if (parallel_forum_blocks.empty()) {
+			if (parallel_next_block >= total_blocks) {
+				ReportProgress(random_ranked_persons.size());
+				return true;
+			}
+			auto remaining_blocks = total_blocks - parallel_next_block;
+			auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, MaxValue<idx_t>(threads, 1));
+			parallel_forum_blocks.resize(blocks_to_generate);
+			parallel_forum_block_offsets.assign(blocks_to_generate, 0);
+			for (idx_t block_index = 0; block_index < blocks_to_generate; block_index++) {
+				parallel_forum_blocks[block_index] = InitializeBlockState(parallel_next_block + block_index);
+			}
+		}
+
+		GenerateNextForumBlockChunks();
+		for (idx_t block_index = 0; block_index < parallel_forum_blocks.size(); block_index++) {
+			if (parallel_forum_block_offsets[block_index] < parallel_forum_blocks[block_index].block.size()) {
+				return false;
+			}
+		}
+
+		auto blocks_generated = parallel_forum_blocks.size();
+		for (auto &generated_block : parallel_forum_blocks) {
+			for (auto &forum : generated_block.forums) {
+				Emit(std::move(forum));
+			}
+			processed_persons += generated_block.block_end - generated_block.block_start;
+			ReportProgress(processed_persons);
+		}
+		parallel_forum_blocks.clear();
+		parallel_forum_block_offsets.clear();
+		parallel_next_block += blocks_generated;
+		block_start = parallel_next_block * block_size;
+		if (processed_persons >= random_ranked_persons.size()) {
+			ReportProgress(random_ranked_persons.size());
+			return true;
+		}
+		return false;
+	}
+
+	bool GenerateNextParallelSlices(idx_t total_blocks, idx_t block_size) {
 		if (parallel_next_block >= total_blocks) {
 			ReportProgress(random_ranked_persons.size());
 			return true;
 		}
 
 		auto remaining_blocks = total_blocks - parallel_next_block;
-		auto max_concurrent_blocks = MaxValue<idx_t>(threads, 1);
-		if (UseForumSliceReplay()) {
-			max_concurrent_blocks = MaxValue<idx_t>(1, threads / 2);
-		}
+		auto max_concurrent_blocks = MaxValue<idx_t>(1, threads / 2);
 		auto blocks_to_generate = MinValue<idx_t>(remaining_blocks, max_concurrent_blocks);
 		vector<BlockState> generated_blocks(blocks_to_generate);
-		if (UseForumSliceReplay()) {
-			GenerateBlocksWithGlobalSliceTasks(parallel_next_block, generated_blocks);
-		} else if (blocks_to_generate == 1) {
-			generated_blocks[0] = GenerateBlock(parallel_next_block);
-		} else {
-			GenerateBlocksWithDuckDBTasks(parallel_next_block, generated_blocks);
-		}
-
+		GenerateBlocksWithGlobalSliceTasks(parallel_next_block, generated_blocks);
 		for (auto &generated_block : generated_blocks) {
 			for (auto &forum : generated_block.forums) {
 				Emit(std::move(forum));
@@ -2047,7 +2085,7 @@ struct LdbcForumGenerator::Impl {
 		if (random_ranked_persons.empty()) {
 			return 100.0;
 		}
-		auto completed_persons = MaxValue<idx_t>(processed_persons, replayed_persons.load());
+		auto completed_persons = MaxValue<idx_t>(processed_persons, parallel_completed_persons.load());
 		return 100.0 * (static_cast<double>(completed_persons) / static_cast<double>(random_ranked_persons.size()));
 	}
 
@@ -2138,21 +2176,6 @@ struct LdbcForumGenerator::Impl {
 		return result;
 	}
 
-	BlockState GenerateBlock(idx_t block_index) const {
-		auto state = InitializeBlockState(block_index);
-		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
-			auto person = state.block[person_offset];
-			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-			              state.local_message_id, state.forums);
-		}
-		if (block_callback) {
-			block_callback(state.block_id, state.block_start, state.block_end, state.forums);
-			state.forums.clear();
-			state.forums.shrink_to_fit();
-		}
-		return state;
-	}
-
 	PreparedForumBlock PrepareForumBlock(idx_t block_index) const {
 		PreparedForumBlock result;
 		result.state = InitializeBlockState(block_index);
@@ -2209,7 +2232,7 @@ struct LdbcForumGenerator::Impl {
 			slice_forums.shrink_to_fit();
 		}
 		auto person_count = end.block_offset - start.block_offset;
-		auto completed_persons = replayed_persons.fetch_add(person_count) + person_count;
+		auto completed_persons = parallel_completed_persons.fetch_add(person_count) + person_count;
 		ReportProgress(completed_persons);
 	}
 
@@ -2236,6 +2259,47 @@ struct LdbcForumGenerator::Impl {
 
 	bool UseForumSliceReplay() const {
 		return (block_callback || slice_callback) && threads > 1;
+	}
+
+	void GenerateNextForumBlockChunks() {
+		class LdbcForumBlockChunkTask : public BaseExecutorTask {
+		public:
+			LdbcForumBlockChunkTask(TaskExecutor &executor, const Impl &generator, BlockState &block,
+			                        idx_t &block_offset)
+			    : BaseExecutorTask(executor), generator(generator), block(block), block_offset(block_offset) {
+			}
+
+			void ExecuteTask() override {
+				auto start = block_offset;
+				auto end = MinValue<idx_t>(block.block.size(), start + LDBC_FORUM_SLICE_SIZE);
+				for (; block_offset < end; block_offset++) {
+					auto person = block.block[block_offset];
+					generator.ProcessPerson(*person, block.block, block.random_farm, block.block_id,
+					                        block.local_forum_id, block.local_message_id, block.forums);
+				}
+				auto completed_persons = generator.parallel_completed_persons.fetch_add(end - start) + end - start;
+				generator.ReportProgress(completed_persons);
+			}
+
+			string TaskType() const override {
+				return "LdbcForumBlockChunkTask";
+			}
+
+		private:
+			const Impl &generator;
+			BlockState &block;
+			idx_t &block_offset;
+		};
+
+		TaskExecutor executor(*context);
+		for (idx_t block_index = 0; block_index < parallel_forum_blocks.size(); block_index++) {
+			if (parallel_forum_block_offsets[block_index] >= parallel_forum_blocks[block_index].block.size()) {
+				continue;
+			}
+			executor.ScheduleTask(make_uniq<LdbcForumBlockChunkTask>(
+			    executor, *this, parallel_forum_blocks[block_index], parallel_forum_block_offsets[block_index]));
+		}
+		executor.WorkOnTasks();
 	}
 
 	void GenerateBlocksWithGlobalSliceTasks(idx_t first_block, vector<BlockState> &generated_blocks) {
@@ -2296,46 +2360,6 @@ struct LdbcForumGenerator::Impl {
 		for (idx_t block_index = 0; block_index < prepared_blocks.size(); block_index++) {
 			generated_blocks[block_index] = FinishForumBlock(prepared_blocks[block_index]);
 		}
-	}
-
-	void GenerateBlocksWithDuckDBTasks(idx_t first_block, vector<BlockState> &generated_blocks) {
-		class LdbcForumBlockTask : public BaseExecutorTask {
-		public:
-			LdbcForumBlockTask(TaskExecutor &executor, const Impl &generator, idx_t first_block,
-			                   vector<BlockState> &generated_blocks, std::atomic<idx_t> &next_block)
-			    : BaseExecutorTask(executor), generator(generator), first_block(first_block),
-			      generated_blocks(generated_blocks), next_block(next_block) {
-			}
-
-			void ExecuteTask() override {
-				while (true) {
-					auto local_block = next_block.fetch_add(1);
-					if (local_block >= generated_blocks.size()) {
-						break;
-					}
-					generated_blocks[local_block] = generator.GenerateBlock(first_block + local_block);
-				}
-			}
-
-			string TaskType() const override {
-				return "LdbcForumBlockTask";
-			}
-
-		private:
-			const Impl &generator;
-			idx_t first_block;
-			vector<BlockState> &generated_blocks;
-			std::atomic<idx_t> &next_block;
-		};
-
-		std::atomic<idx_t> next_block(0);
-		TaskExecutor executor(*context);
-		auto worker_count = MinValue<idx_t>(threads, generated_blocks.size());
-		for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
-			executor.ScheduleTask(
-			    make_uniq<LdbcForumBlockTask>(executor, *this, first_block, generated_blocks, next_block));
-		}
-		executor.WorkOnTasks();
 	}
 
 	void ProcessPerson(const LdbcPersonCore &person, const vector<const LdbcPersonCore *> &current_block,
@@ -2471,7 +2495,7 @@ struct LdbcForumGenerator::Impl {
 	vector<const LdbcPersonCore *> random_ranked_persons;
 	vector<LdbcForum> forums;
 	idx_t processed_persons = 0;
-	mutable std::atomic<idx_t> replayed_persons {0};
+	mutable std::atomic<idx_t> parallel_completed_persons {0};
 	mutable std::mutex progress_lock;
 	mutable idx_t reported_persons = 0;
 	idx_t block_start = 0;
@@ -2482,6 +2506,8 @@ struct LdbcForumGenerator::Impl {
 	int64_t local_forum_id = 0;
 	int64_t local_message_id = 0;
 	idx_t parallel_next_block = 0;
+	vector<BlockState> parallel_forum_blocks;
+	vector<idx_t> parallel_forum_block_offsets;
 };
 
 LdbcForumGenerator::LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
