@@ -582,6 +582,12 @@ FROM read_parquet('out/sf0.003-parquet/dynamic/Person.parquet');
 ----
 50
 
+query I
+SELECT COUNT(*)
+FROM glob('out/sf0.003-parquet/.ldbcgen-staging-*');
+----
+0
+
 query ITTI
 SELECT COUNT(*), MIN(format), MIN(status), SUM(row_count)
 FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-csv', format := 'csv', overwrite := true);
@@ -593,6 +599,23 @@ SELECT COUNT(*)
 FROM read_csv('out/sf0.003-csv/dynamic/Person.csv', header := true);
 ----
 50
+
+query I
+SELECT COUNT(*)
+FROM glob('out/sf0.003-csv/.ldbcgen-staging-*');
+----
+0
+
+statement error
+CALL ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/staging-error', dictionary_dir := 'does-not-exist');
+----
+IO Error: Could not open LDBC dictionary file 'does-not-exist/dicLocations.txt'
+
+query I
+SELECT COUNT(*)
+FROM glob('out/staging-error/.ldbcgen-staging-*');
+----
+0
 
 statement error
 CALL ldbcgen(sf := 0);

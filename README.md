@@ -72,7 +72,7 @@ CALL ldbcgen(
 );
 ```
 
-File output writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Parquet snapshots are streamed directly to numbered part files for the generated person/forum relations; other relations and CSV output are copied from staging tables. Consequently, a returned `path` can identify either a single file or a relation directory containing part files. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing output.
+File output writes the Spark-compatible BI layout under `<output_dir>/graphs/<format>/bi/composite-merged-fk/`, including `initial_snapshot`, dynamic `inserts`, and dynamic `deletes`. Parquet snapshots are streamed directly to numbered part files for the generated person/forum relations; other relations and CSV output are copied from staging tables. Staging uses a UUID-named temporary disk-backed DuckDB database that is removed on success or failure. Its buffer budget is derived from DuckDB's memory limit, so large generations require temporary disk headroom alongside the final output. Consequently, a returned `path` can identify either a single file or a relation directory containing part files. Supported formats are `parquet` and `csv`; CSV output includes a header row. Use `overwrite := true` to replace existing output.
 
 Schema-only metadata is available through:
 
@@ -90,9 +90,9 @@ An SF100 BI Parquet dataset completes with the default DuckDB thread count on a 
 
 | SF | Threads | Wall time | Peak RSS | Output | Parquet files |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 | 18 (default) | 2:19.12 | 15.8 GiB | 20 GiB | 9,517 |
+| 100 | 18 (default) | 2:44.57 | 10.9 GiB | 20 GiB | 9,517 |
 
-This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `2650e5eb3b26`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. Every generated Parquet footer was read successfully after the run. See [the performance notes](docs/performance.md) for the exact command, measurement details, and historical results.
+This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `4598bb777b7c`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. Every generated Parquet footer was read successfully after the run. See [the performance notes](docs/performance.md) for the exact command, measurement details, and historical results.
 
 ## BI Queries
 

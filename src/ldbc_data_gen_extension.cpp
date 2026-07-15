@@ -27,6 +27,7 @@
 #include "duckdb/common/file_system.hpp"
 #include "duckdb/common/sql_identifier.hpp"
 #include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/uuid.hpp"
 #include "duckdb/parallel/task_executor.hpp"
 #include "duckdb/parallel/task_scheduler.hpp"
 #include "duckdb/main/connection.hpp"
@@ -194,6 +195,73 @@ static void ExecuteLdbcSQL(ClientContext &context, const string &sql);
 
 class LdbcLoadGenerator;
 
+class LdbcStagingDatabase {
+public:
+	LdbcStagingDatabase(FileSystem &file_system_p, string directory_p, idx_t maximum_memory, idx_t threads)
+	    : file_system(file_system_p), directory(std::move(directory_p)) {
+		try {
+			file_system.CreateDirectoriesRecursive(directory);
+			DBConfig config;
+			config.options.maximum_memory = maximum_memory;
+			config.options.maximum_threads = threads;
+			config.options.checkpoint_on_shutdown = false;
+			auto database_path = file_system.JoinPath(directory, "staging.duckdb");
+			database = make_uniq<DuckDB>(database_path, &config);
+			connection = make_uniq<Connection>(*database);
+		} catch (...) {
+			Close();
+			throw;
+		}
+	}
+
+	~LdbcStagingDatabase() {
+		Close();
+	}
+
+	Connection &GetConnection() {
+		return *connection;
+	}
+
+private:
+	void Close() noexcept {
+		connection.reset();
+		database.reset();
+		try {
+			file_system.RemoveDirectory(directory);
+		} catch (...) {
+		}
+	}
+
+	FileSystem &file_system;
+	string directory;
+	unique_ptr<DuckDB> database;
+	unique_ptr<Connection> connection;
+};
+
+static idx_t LdbcStagingDatabaseMemoryLimit(ClientContext &context) {
+	constexpr idx_t MINIMUM_STAGING_MEMORY = 512ULL * 1024ULL * 1024ULL;
+	constexpr idx_t MAXIMUM_STAGING_MEMORY = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+	auto maximum_memory = DBConfig::GetConfig(context).options.maximum_memory;
+	if (maximum_memory == DConstants::INVALID_INDEX) {
+		return MAXIMUM_STAGING_MEMORY;
+	}
+	auto staging_memory = MinValue<idx_t>(MAXIMUM_STAGING_MEMORY, maximum_memory / 4);
+	staging_memory = MaxValue<idx_t>(MINIMUM_STAGING_MEMORY, staging_memory);
+	return MinValue<idx_t>(maximum_memory, staging_memory);
+}
+
+static string LdbcStagingDatabaseDirectory(ClientContext &context, const LdbcGenBindData &bind_data) {
+	auto &file_system = FileSystem::GetFileSystem(context);
+	auto base_directory = bind_data.output_dir;
+	if (FileSystem::IsRemoteFile(base_directory)) {
+		base_directory = DBConfig::GetConfig(context).options.temporary_directory;
+		if (base_directory.empty() || FileSystem::IsRemoteFile(base_directory)) {
+			base_directory = FileSystem::GetWorkingDirectory();
+		}
+	}
+	return file_system.JoinPath(base_directory, ".ldbcgen-staging-" + UUID::ToString(UUID::GenerateRandomUUID()));
+}
+
 static const LdbcSchemaColumn &LdbcRelationAt(idx_t relation_index);
 static idx_t LdbcRelationIndexByName(const string &relation_name);
 static string LdbcSparkRelationBlockPartPath(ClientContext &context, const LdbcGenBindData &bind_data,
@@ -215,8 +283,7 @@ struct LdbcGenGlobalState : public GlobalTableFunctionState {
 	unordered_map<string, idx_t> row_counts;
 	unordered_map<string, string> output_paths;
 	unique_ptr<LdbcGenBindData> file_bind_data;
-	unique_ptr<DuckDB> file_database;
-	unique_ptr<Connection> file_connection;
+	unique_ptr<LdbcStagingDatabase> staging_database;
 	unique_ptr<LdbcLoadGenerator> load_generator;
 };
 
@@ -3354,17 +3421,19 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 
 	if (bind_data.target == "files" && !state.materialized.load()) {
 		if (!state.load_started.exchange(true)) {
-			state.file_database = make_uniq<DuckDB>(nullptr);
-			state.file_connection = make_uniq<Connection>(*state.file_database);
+			state.staging_database = make_uniq<LdbcStagingDatabase>(
+			    FileSystem::GetFileSystem(context), LdbcStagingDatabaseDirectory(context, bind_data),
+			    LdbcStagingDatabaseMemoryLimit(context), bind_data.threads);
+			auto &staging_connection = state.staging_database->GetConnection();
 			state.file_bind_data = make_uniq<LdbcGenBindData>(bind_data);
 			state.file_bind_data->target = "tables";
 			state.file_bind_data->catalog =
-			    DatabaseManager::GetDefaultDatabase(*state.file_connection->context).GetIdentifierName();
+			    DatabaseManager::GetDefaultDatabase(*staging_connection.context).GetIdentifierName();
 			state.file_bind_data->schema = "__ldbcgen_files_" + std::to_string(reinterpret_cast<uintptr_t>(&state));
 			state.file_bind_data->overwrite = true;
 			state.file_bind_data->primary_keys = false;
 			state.file_bind_data->emit_updates = true;
-			auto &file_context = *state.file_connection->context;
+			auto &file_context = *staging_connection.context;
 			if (state.file_bind_data->direct_forum_parquet || state.file_bind_data->direct_person_parquet) {
 				EnsureLdbcOutputDirectories(file_context, *state.file_bind_data);
 			}
@@ -3373,10 +3442,10 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 			MarkLdbcTransactionReadWrite(file_context, state.file_bind_data->catalog);
 			state.load_generator = make_uniq<LdbcLoadGenerator>(file_context, *state.file_bind_data, state);
 		}
-		if (!state.load_generator || !state.file_bind_data || !state.file_connection) {
+		if (!state.load_generator || !state.file_bind_data || !state.staging_database) {
 			throw InternalException("LDBC file load generator was not initialized");
 		}
-		auto &file_context = *state.file_connection->context;
+		auto &file_context = *state.staging_database->GetConnection().context;
 		idx_t iterations =
 		    data_p.results_execution_mode == AsyncResultsExecutionMode::TASK_EXECUTOR ? 1 : DConstants::INVALID_INDEX;
 		for (idx_t iteration = 0; iteration < iterations; iteration++) {
@@ -3389,8 +3458,7 @@ static void LdbcGenFunction(ClientContext &context, TableFunctionInput &data_p, 
 				               "DROP SCHEMA " + SQLQuotedIdentifier::ToString(state.file_bind_data->catalog) + "." +
 				                   SQLQuotedIdentifier::ToString(state.file_bind_data->schema) + " CASCADE");
 				state.file_bind_data.reset();
-				state.file_connection.reset();
-				state.file_database.reset();
+				state.staging_database.reset();
 				state.materialized.store(true);
 				break;
 			}
