@@ -999,7 +999,7 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
                          const LdbcActivityDeleteDistribution &delete_distribution,
                          LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                          const vector<LdbcActivityMembership> &memberships, const LdbcActivityMessage &message,
-                         bool comment_like) {
+                         bool comment_like, LdbcForumOutputSink *output_sink) {
 	auto member_count = NumericCast<int32_t>(memberships.size());
 	auto like_count = std::min<int32_t>(PowerDistributionValue(random_farm.Get(LdbcRandomAspect::NUM_LIKE), 1.0,
 	                                                           static_cast<double>(config.max_num_like), 0.07),
@@ -1031,8 +1031,17 @@ static void ConsumeLikes(const LdbcDatagenConfig &config, const LdbcDateGenerato
 			like_deletion = delete_distribution.NextDeleteDate(random_farm.Get(LdbcRandomAspect::NUM_LIKE),
 			                                                   min_deletion, max_deletion);
 		}
-		auto &likes = comment_like ? forum.comment_likes : forum.post_likes;
-		likes.push_back({like_creation, like_deletion, explicitly_deleted, membership.person->account_id, message.id});
+		LdbcLike like {like_creation, like_deletion, explicitly_deleted, membership.person->account_id, message.id};
+		if (output_sink) {
+			if (comment_like) {
+				output_sink->AppendCommentLike(like);
+			} else {
+				output_sink->AppendPostLike(like);
+			}
+		} else {
+			auto &likes = comment_like ? forum.comment_likes : forum.post_likes;
+			likes.push_back(std::move(like));
+		}
 	}
 }
 
@@ -1041,7 +1050,8 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
                             const LdbcActivityDeleteDistribution &delete_distribution,
                             LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                             const vector<LdbcActivityMembership> &memberships, const LdbcActivityMessage &post,
-                            int32_t comment_count, int64_t block_id, int64_t &local_message_id) {
+                            int32_t comment_count, int64_t block_id, int64_t &local_message_id,
+                            LdbcForumOutputSink *output_sink) {
 	vector<LdbcActivityMessage> parent_candidates;
 	parent_candidates.reserve(NumericCast<idx_t>(comment_count) + 1);
 	parent_candidates.push_back(post);
@@ -1146,17 +1156,24 @@ static void ConsumeComments(const LdbcDatagenConfig &config, const LdbcDateGener
 		auto comment_id = FormActivityId(config, dates, local_message_id++, creation_date, block_id);
 		auto parent_post_id = parent.id == post.id ? parent.id : int64_t(-1);
 		auto parent_comment_id = parent.id == post.id ? int64_t(-1) : parent.id;
-		forum.comments.push_back({creation_date, deletion_date, explicitly_deleted, comment_id, ip_address,
-		                          dictionaries.browsers.GetName(browser_id), std::move(content), content_length,
-		                          membership.person->account_id, country_id, parent_post_id, parent_comment_id,
-		                          comment_tags});
+		LdbcComment emitted_comment {creation_date,      deletion_date,  explicitly_deleted,
+		                             comment_id,         ip_address,     dictionaries.browsers.GetName(browser_id),
+		                             std::move(content), content_length, membership.person->account_id,
+		                             country_id,         parent_post_id, parent_comment_id,
+		                             comment_tags};
+		if (output_sink) {
+			output_sink->AppendComment(emitted_comment);
+		} else {
+			forum.comments.push_back(std::move(emitted_comment));
+		}
 		LdbcActivityMessage comment {membership.person, comment_id,   post.id,  creation_date,
 		                             deletion_date,     comment_tags, !is_short};
 		if (!is_short) {
 			parent_candidates.push_back(comment);
 		}
 		if (content_length > 10 && random_farm.Get(LdbcRandomAspect::NUM_LIKE).NextDouble() <= 0.1) {
-			ConsumeLikes(config, dates, delete_distribution, random_farm, forum, memberships, comment, true);
+			ConsumeLikes(config, dates, delete_distribution, random_farm, forum, memberships, comment, true,
+			             output_sink);
 		}
 	}
 }
@@ -1329,7 +1346,7 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
                                 LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                                 const vector<LdbcActivityMembership> &memberships,
                                 const vector<LdbcActivityMembership> &forum_memberships, int64_t num_posts_in_forum,
-                                int64_t block_id, int64_t &local_message_id) {
+                                int64_t block_id, int64_t &local_message_id, LdbcForumOutputSink *output_sink) {
 	if (memberships.empty()) {
 		return;
 	}
@@ -1381,6 +1398,7 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
 			}
 			auto generated_text = GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tags);
 			auto content_length = generated_text.java_length;
+			LdbcPost emitted_post;
 			if (ChangeUsualCountry(config, random_farm.Get(LdbcRandomAspect::DIFF_IP_FOR_TRAVELER), post_creation)) {
 				auto country_idx = random_farm.Get(LdbcRandomAspect::COUNTRY)
 				                       .NextInt(NumericCast<int32_t>(dictionaries.places.GetCountries().size()));
@@ -1388,28 +1406,51 @@ static void ConsumeUniformPosts(const LdbcDatagenConfig &config, const LdbcDateG
 				auto ip_address = dictionaries.ips.GetIP(random_farm.Get(LdbcRandomAspect::IP), country_id);
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
-				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "", ip_address,
-				                       dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id,
-				                       forum.id, country_id, post_tags});
+				emitted_post = {post_creation,
+				                post_deletion,
+				                explicitly_deleted,
+				                message_id,
+				                "",
+				                ip_address,
+				                dictionaries.browsers.GetName(browser_id),
+				                dictionaries.languages.GetLanguageName(forum.language_id),
+				                std::move(generated_text.content),
+				                content_length,
+				                membership.person->account_id,
+				                forum.id,
+				                country_id,
+				                post_tags};
 			} else {
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
-				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
-				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id,
-				                       forum.id, membership.person->country_id, post_tags});
+				emitted_post = {post_creation,
+				                post_deletion,
+				                explicitly_deleted,
+				                message_id,
+				                "",
+				                membership.person->ip_address,
+				                dictionaries.browsers.GetName(browser_id),
+				                dictionaries.languages.GetLanguageName(forum.language_id),
+				                std::move(generated_text.content),
+				                content_length,
+				                membership.person->account_id,
+				                forum.id,
+				                membership.person->country_id,
+				                post_tags};
 			}
-			auto &emitted_post = forum.posts.back();
 			LdbcActivityMessage post {
 			    membership.person, emitted_post.id, emitted_post.id, post_creation, post_deletion, post_tags, true};
+			if (output_sink) {
+				output_sink->AppendPost(emitted_post);
+			} else {
+				forum.posts.push_back(std::move(emitted_post));
+			}
 			if (random_farm.Get(LdbcRandomAspect::NUM_LIKE).NextDouble() <= 0.1) {
-				ConsumeLikes(config, dates, delete_distribution, random_farm, forum, forum_memberships, post, false);
+				ConsumeLikes(config, dates, delete_distribution, random_farm, forum, forum_memberships, post, false,
+				             output_sink);
 			}
 			ConsumeComments(config, dates, dictionaries, delete_distribution, random_farm, forum, forum_memberships,
-			                post, comment_count, block_id, local_message_id);
+			                post, comment_count, block_id, local_message_id, output_sink);
 		}
 	}
 }
@@ -1479,7 +1520,7 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
                                  LdbcRandomGeneratorFarm &random_farm, LdbcForum &forum,
                                  const vector<LdbcActivityMembership> &memberships,
                                  const vector<LdbcActivityMembership> &forum_memberships, int64_t num_posts_in_forum,
-                                 int64_t block_id, int64_t &local_message_id) {
+                                 int64_t block_id, int64_t &local_message_id, LdbcForumOutputSink *output_sink) {
 	if (memberships.empty()) {
 		return;
 	}
@@ -1555,6 +1596,7 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 			auto generated_text =
 			    GeneratePostText(config, dictionaries, random_farm, *membership.person, post_tag_list);
 			auto content_length = generated_text.java_length;
+			LdbcPost emitted_post;
 			if (ChangeUsualCountry(config, random_farm.Get(LdbcRandomAspect::DIFF_IP_FOR_TRAVELER), post_creation)) {
 				auto country_idx = random_farm.Get(LdbcRandomAspect::COUNTRY)
 				                       .NextInt(NumericCast<int32_t>(dictionaries.places.GetCountries().size()));
@@ -1562,21 +1604,38 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 				auto ip_address = dictionaries.ips.GetIP(random_farm.Get(LdbcRandomAspect::IP), country_id);
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
-				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "", ip_address,
-				                       dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id,
-				                       forum.id, country_id, post_tag_list});
+				emitted_post = {post_creation,
+				                post_deletion,
+				                explicitly_deleted,
+				                message_id,
+				                "",
+				                ip_address,
+				                dictionaries.browsers.GetName(browser_id),
+				                dictionaries.languages.GetLanguageName(forum.language_id),
+				                std::move(generated_text.content),
+				                content_length,
+				                membership.person->account_id,
+				                forum.id,
+				                country_id,
+				                post_tag_list};
 			} else {
 				auto browser_id = GeneratePostBrowser(config, dictionaries, random_farm, membership.person->browser_id);
 				auto message_id = FormActivityId(config, dates, local_message_id++, post_creation, block_id);
-				forum.posts.push_back({post_creation, post_deletion, explicitly_deleted, message_id, "",
-				                       membership.person->ip_address, dictionaries.browsers.GetName(browser_id),
-				                       dictionaries.languages.GetLanguageName(forum.language_id),
-				                       std::move(generated_text.content), content_length, membership.person->account_id,
-				                       forum.id, membership.person->country_id, post_tag_list});
+				emitted_post = {post_creation,
+				                post_deletion,
+				                explicitly_deleted,
+				                message_id,
+				                "",
+				                membership.person->ip_address,
+				                dictionaries.browsers.GetName(browser_id),
+				                dictionaries.languages.GetLanguageName(forum.language_id),
+				                std::move(generated_text.content),
+				                content_length,
+				                membership.person->account_id,
+				                forum.id,
+				                membership.person->country_id,
+				                post_tag_list};
 			}
-			auto &emitted_post = forum.posts.back();
 			LdbcActivityMessage post {membership.person,
 			                          emitted_post.id,
 			                          emitted_post.id,
@@ -1584,11 +1643,17 @@ static void ConsumeFlashmobPosts(const LdbcDatagenConfig &config, const LdbcDate
 			                          post_deletion,
 			                          emitted_post.tags,
 			                          true};
+			if (output_sink) {
+				output_sink->AppendPost(emitted_post);
+			} else {
+				forum.posts.push_back(std::move(emitted_post));
+			}
 			if (random_farm.Get(LdbcRandomAspect::NUM_LIKE).NextDouble() <= 0.1) {
-				ConsumeLikes(config, dates, delete_distribution, random_farm, forum, forum_memberships, post, false);
+				ConsumeLikes(config, dates, delete_distribution, random_farm, forum, forum_memberships, post, false,
+				             output_sink);
 			}
 			ConsumeComments(config, dates, dictionaries, delete_distribution, random_farm, forum, forum_memberships,
-			                post, comment_count, block_id, local_message_id);
+			                post, comment_count, block_id, local_message_id, output_sink);
 		}
 	}
 }
@@ -1598,7 +1663,7 @@ static void ConsumePhotos(const LdbcDatagenConfig &config, const LdbcDateGenerat
                           const LdbcActivityDeleteDistribution &delete_distribution,
                           LdbcRandomGeneratorFarm &random_farm, LdbcForum &album, const LdbcPersonCore &moderator,
                           const vector<LdbcActivityMembership> &album_memberships, int32_t photo_count,
-                          int64_t block_id, int64_t &local_message_id) {
+                          int64_t block_id, int64_t &local_message_id, LdbcForumOutputSink *output_sink) {
 	auto popular_count = random_farm.Get(LdbcRandomAspect::NUM_POPULAR).NextInt(config.max_num_popular_places + 1);
 	for (int32_t idx = 0; idx < popular_count; idx++) {
 		popular_places.ConsumePopularPlace(random_farm.Get(LdbcRandomAspect::POPULAR), album.place_id);
@@ -1629,14 +1694,30 @@ static void ConsumePhotos(const LdbcDatagenConfig &config, const LdbcDateGenerat
 			ip_address = dictionaries.ips.GetIP(random_farm.Get(LdbcRandomAspect::IP), country_id);
 		}
 		auto message_id = FormActivityId(config, dates, local_message_id++, creation_date, block_id);
-		album.posts.push_back({creation_date, deletion_date, explicitly_deleted, message_id,
-		                       "photo" + std::to_string(message_id) + ".jpg", ip_address,
-		                       dictionaries.browsers.GetName(moderator.browser_id), "", "", 0, moderator.account_id,
-		                       album.id, country_id, vector<int32_t>()});
+		LdbcPost photo_post {creation_date,
+		                     deletion_date,
+		                     explicitly_deleted,
+		                     message_id,
+		                     "photo" + std::to_string(message_id) + ".jpg",
+		                     ip_address,
+		                     dictionaries.browsers.GetName(moderator.browser_id),
+		                     "",
+		                     "",
+		                     0,
+		                     moderator.account_id,
+		                     album.id,
+		                     country_id,
+		                     vector<int32_t>()};
 		LdbcActivityMessage photo {&moderator,    message_id,        message_id, creation_date,
 		                           deletion_date, vector<int32_t>(), true};
+		if (output_sink) {
+			output_sink->AppendPost(photo_post);
+		} else {
+			album.posts.push_back(std::move(photo_post));
+		}
 		if (random_farm.Get(LdbcRandomAspect::NUM_LIKE).NextDouble() <= 0.1) {
-			ConsumeLikes(config, dates, delete_distribution, random_farm, album, album_memberships, photo, false);
+			ConsumeLikes(config, dates, delete_distribution, random_farm, album, album_memberships, photo, false,
+			             output_sink);
 		}
 	}
 }
@@ -1823,17 +1904,42 @@ static bool CreateAlbumForum(const LdbcDatagenConfig &config, const LdbcDateGene
 	return true;
 }
 
+class LdbcDiscardForumOutputSink final : public LdbcForumOutputSink {
+public:
+	void AppendForum(const LdbcForum &forum) override {
+		(void)forum;
+	}
+
+	void AppendPost(const LdbcPost &post) override {
+		(void)post;
+	}
+
+	void AppendComment(const LdbcComment &comment) override {
+		(void)comment;
+	}
+
+	void AppendPostLike(const LdbcLike &like) override {
+		(void)like;
+	}
+
+	void AppendCommentLike(const LdbcLike &like) override {
+		(void)like;
+	}
+
+	void Finish() override {
+	}
+};
+
 } // namespace
 
 struct LdbcForumGenerator::Impl {
 	Impl(const LdbcDatagenConfig &config_p, const vector<LdbcPersonCore> &persons_p,
 	     const vector<LdbcKnowsEdge> &knows_edges_p, const std::function<void(LdbcForum &&forum)> &emit_forum_p,
 	     const std::function<void(idx_t done, idx_t total)> &progress_p, idx_t threads_p, ClientContext *context_p,
-	     const LdbcForumGenerator::BlockCallback &block_callback_p,
-	     const LdbcForumGenerator::SliceCallback &slice_callback_p)
+	     const LdbcForumGenerator::OutputSinkFactory &output_sink_factory_p)
 	    : config(config_p), persons(persons_p), emit_forum(emit_forum_p), progress(progress_p),
-	      threads(MaxValue<idx_t>(threads_p, 1)), context(context_p), block_callback(block_callback_p),
-	      slice_callback(slice_callback_p), dates(config),
+	      threads(MaxValue<idx_t>(threads_p, 1)), context(context_p), output_sink_factory(output_sink_factory_p),
+	      dates(config),
 	      dictionaries(config.resource_dir, config.prob_english, config.prob_second_lang, config.tag_country_corr_prob,
 	                   config.prob_uncorrelated_company, config.prob_uncorrelated_organisation, config.prob_top_univ),
 	      flashmobs(config, dates, dictionaries), flashmob_dates(config.resource_dir),
@@ -1947,7 +2053,6 @@ struct LdbcForumGenerator::Impl {
 	struct PreparedForumBlock {
 		BlockState state;
 		vector<ForumSliceState> slice_states;
-		vector<vector<LdbcForum>> slice_forums;
 	};
 
 	bool GenerateNext(idx_t max_persons) {
@@ -1964,10 +2069,22 @@ struct LdbcForumGenerator::Impl {
 				InitializeBlock();
 			}
 			vector<LdbcForum> person_forums;
+			if (output_sink_factory && !serial_output_sink) {
+				serial_output_sink = output_sink_factory(serial_next_sink_id);
+				if (!serial_output_sink) {
+					throw InternalException("Forum output sink factory returned a null sink");
+				}
+			}
 			ProcessPerson(*block[block_position++], block, random_farm, block_id, local_forum_id, local_message_id,
-			              person_forums);
+			              person_forums, serial_output_sink.get());
 			for (auto &forum : person_forums) {
 				Emit(std::move(forum));
+			}
+			if (serial_output_sink &&
+			    (block_position == block.size() || (block_position % LDBC_FORUM_SLICE_SIZE) == 0)) {
+				serial_output_sink->Finish();
+				serial_output_sink.reset();
+				serial_next_sink_id++;
 			}
 			processed_persons++;
 			generated++;
@@ -2157,6 +2274,7 @@ struct LdbcForumGenerator::Impl {
 		auto state = InitializeBlockState(block_index);
 		auto block_person_count = state.block_end - state.block_start;
 		LdbcDiscardGeneratedTextScope discard_text_scope;
+		LdbcDiscardForumOutputSink output_sink;
 		for (idx_t person_offset = 0; person_offset < state.block.size(); person_offset++) {
 			if (ShouldRecordSliceBoundary(person_offset, block_person_count)) {
 				RecordSliceState(result.slice_states, person_offset, state.random_farm, state.local_forum_id,
@@ -2165,7 +2283,7 @@ struct LdbcForumGenerator::Impl {
 			vector<LdbcForum> person_forums;
 			auto person = state.block[person_offset];
 			ProcessPerson(*person, state.block, state.random_farm, state.block_id, state.local_forum_id,
-			              state.local_message_id, person_forums);
+			              state.local_message_id, person_forums, &output_sink);
 		}
 		if (ShouldRecordSliceBoundary(block_person_count, block_person_count)) {
 			RecordSliceState(result.slice_states, block_person_count, state.random_farm, state.local_forum_id,
@@ -2186,7 +2304,6 @@ struct LdbcForumGenerator::Impl {
 		result.state.slice_prepass_final_local_forum_id = scan.final_local_forum_id;
 		result.state.slice_prepass_final_local_message_id = scan.final_local_message_id;
 		result.slice_states = std::move(scan.slice_states);
-		result.slice_forums.resize(result.slice_states.size() - 1);
 		return result;
 	}
 
@@ -2198,20 +2315,18 @@ struct LdbcForumGenerator::Impl {
 		slice_random_farm.Restore(start.random_state);
 		auto local_forum_id = start.local_forum_id;
 		auto local_message_id = start.local_message_id;
-		auto &slice_forums = block.slice_forums[slice_index];
 		auto slices_per_block =
 		    (NumericCast<idx_t>(config.block_size) + LDBC_FORUM_SLICE_SIZE - 1) / LDBC_FORUM_SLICE_SIZE;
 		auto global_slice_id = state.block_id * slices_per_block + slice_index;
+		auto output_sink = output_sink_factory(global_slice_id);
+		if (!output_sink) {
+			throw InternalException("Forum output sink factory returned a null sink");
+		}
 		vector<LdbcForum> person_forums;
 		for (idx_t person_offset = start.block_offset; person_offset < end.block_offset; person_offset++) {
 			auto person = state.block[person_offset];
-			auto &output_forums = slice_callback ? person_forums : slice_forums;
 			ProcessPerson(*person, state.block, slice_random_farm, state.block_id, local_forum_id, local_message_id,
-			              output_forums);
-			if (slice_callback) {
-				slice_callback(global_slice_id, state.block_start + start.block_offset,
-				               state.block_start + end.block_offset, person_forums, false);
-			}
+			              person_forums, output_sink.get());
 		}
 		if (local_forum_id != end.local_forum_id || local_message_id != end.local_message_id ||
 		    slice_random_farm.Snapshot() != end.random_state) {
@@ -2220,28 +2335,13 @@ struct LdbcForumGenerator::Impl {
 			                        static_cast<unsigned long long>(slice_index),
 			                        static_cast<unsigned long long>(end.block_offset));
 		}
-		if (slice_callback) {
-			vector<LdbcForum> no_forums;
-			slice_callback(global_slice_id, state.block_start + start.block_offset,
-			               state.block_start + end.block_offset, no_forums, true);
-		}
-		if (block_callback && !slice_callback) {
-			block_callback(global_slice_id, state.block_start + start.block_offset,
-			               state.block_start + end.block_offset, slice_forums);
-			slice_forums.clear();
-			slice_forums.shrink_to_fit();
-		}
+		output_sink->Finish();
 		auto person_count = end.block_offset - start.block_offset;
 		auto completed_persons = parallel_completed_persons.fetch_add(person_count) + person_count;
 		ReportProgress(completed_persons);
 	}
 
 	BlockState FinishForumBlock(PreparedForumBlock &block) const {
-		for (auto &slice_forums : block.slice_forums) {
-			for (auto &forum : slice_forums) {
-				block.state.forums.push_back(std::move(forum));
-			}
-		}
 		block.state.local_forum_id = block.slice_states.back().local_forum_id;
 		block.state.local_message_id = block.slice_states.back().local_message_id;
 		if (block.state.slice_prepass_final_local_forum_id != block.state.local_forum_id ||
@@ -2258,7 +2358,7 @@ struct LdbcForumGenerator::Impl {
 	}
 
 	bool UseForumSliceReplay() const {
-		return (block_callback || slice_callback) && threads > 1;
+		return static_cast<bool>(output_sink_factory);
 	}
 
 	void GenerateNextForumBlockChunks() {
@@ -2365,7 +2465,7 @@ struct LdbcForumGenerator::Impl {
 	void ProcessPerson(const LdbcPersonCore &person, const vector<const LdbcPersonCore *> &current_block,
 	                   LdbcRandomGeneratorFarm &current_random_farm, idx_t current_block_id,
 	                   int64_t &current_local_forum_id, int64_t &current_local_message_id,
-	                   vector<LdbcForum> &output_forums) const {
+	                   vector<LdbcForum> &output_forums, LdbcForumOutputSink *output_sink = nullptr) const {
 		auto friends = FriendsForPerson(person);
 		if (person.deletion_date - person.creation_date + config.delta >= 0) {
 			LdbcForum wall;
@@ -2389,14 +2489,19 @@ struct LdbcForumGenerator::Impl {
 			{
 				ConsumeUniformPosts(config, dates, dictionaries, delete_distribution, current_random_farm, wall,
 				                    wall_post_memberships, wall_forum_memberships, uniform_posts,
-				                    NumericCast<int64_t>(current_block_id), current_local_message_id);
+				                    NumericCast<int64_t>(current_block_id), current_local_message_id, output_sink);
 			}
 			{
 				ConsumeFlashmobPosts(config, dates, dictionaries, flashmobs, flashmob_dates, delete_distribution,
 				                     current_random_farm, wall, wall_post_memberships, wall_forum_memberships,
-				                     flashmob_posts, NumericCast<int64_t>(current_block_id), current_local_message_id);
+				                     flashmob_posts, NumericCast<int64_t>(current_block_id), current_local_message_id,
+				                     output_sink);
 			}
-			output_forums.push_back(std::move(wall));
+			if (output_sink) {
+				output_sink->AppendForum(wall);
+			} else {
+				output_forums.push_back(std::move(wall));
+			}
 		} else {
 			current_local_forum_id++;
 		}
@@ -2431,15 +2536,19 @@ struct LdbcForumGenerator::Impl {
 				{
 					ConsumeUniformPosts(config, dates, dictionaries, delete_distribution, current_random_farm, forum,
 					                    group_post_memberships, group_post_memberships, uniform_posts,
-					                    NumericCast<int64_t>(current_block_id), current_local_message_id);
+					                    NumericCast<int64_t>(current_block_id), current_local_message_id, output_sink);
 				}
 				{
 					ConsumeFlashmobPosts(config, dates, dictionaries, flashmobs, flashmob_dates, delete_distribution,
 					                     current_random_farm, forum, group_post_memberships, group_post_memberships,
 					                     flashmob_posts, NumericCast<int64_t>(current_block_id),
-					                     current_local_message_id);
+					                     current_local_message_id, output_sink);
 				}
-				output_forums.push_back(std::move(forum));
+				if (output_sink) {
+					output_sink->AppendForum(forum);
+				} else {
+					output_forums.push_back(std::move(forum));
+				}
 			}
 			current_local_forum_id++;
 		}
@@ -2468,9 +2577,13 @@ struct LdbcForumGenerator::Impl {
 				{
 					ConsumePhotos(config, dates, dictionaries, popular_places, delete_distribution, current_random_farm,
 					              forum, person, album_memberships, photo_count, NumericCast<int64_t>(current_block_id),
-					              current_local_message_id);
+					              current_local_message_id, output_sink);
 				}
-				output_forums.push_back(std::move(forum));
+				if (output_sink) {
+					output_sink->AppendForum(forum);
+				} else {
+					output_forums.push_back(std::move(forum));
+				}
 			}
 			current_local_forum_id++;
 		}
@@ -2482,8 +2595,9 @@ struct LdbcForumGenerator::Impl {
 	std::function<void(idx_t done, idx_t total)> progress;
 	idx_t threads;
 	ClientContext *context;
-	LdbcForumGenerator::BlockCallback block_callback;
-	LdbcForumGenerator::SliceCallback slice_callback;
+	LdbcForumGenerator::OutputSinkFactory output_sink_factory;
+	unique_ptr<LdbcForumOutputSink> serial_output_sink;
+	idx_t serial_next_sink_id = 0;
 	LdbcDateGenerator dates;
 	LdbcPersonDictionaries dictionaries;
 	LdbcFlashmobDictionary flashmobs;
@@ -2514,10 +2628,8 @@ LdbcForumGenerator::LdbcForumGenerator(const LdbcDatagenConfig &config, const ve
                                        const vector<LdbcKnowsEdge> &knows_edges,
                                        const std::function<void(LdbcForum &&forum)> &emit_forum,
                                        const std::function<void(idx_t done, idx_t total)> &progress, idx_t threads,
-                                       ClientContext *context, const BlockCallback &block_callback,
-                                       const SliceCallback &slice_callback)
-    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context, block_callback,
-                           slice_callback)) {
+                                       ClientContext *context, const OutputSinkFactory &output_sink_factory)
+    : impl(make_uniq<Impl>(config, persons, knows_edges, emit_forum, progress, threads, context, output_sink_factory)) {
 }
 
 LdbcForumGenerator::~LdbcForumGenerator() = default;

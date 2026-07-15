@@ -1700,14 +1700,6 @@ private:
 		return bind_data.direct_forum_parquet;
 	}
 
-	bool UseForumBlockPrematerialization() const {
-		return UsePrematerializedForumChunks() && bind_data.threads > 1;
-	}
-
-	bool UseDirectForumParquet() const {
-		return bind_data.direct_forum_parquet;
-	}
-
 	bool UseDirectPersonParquet() const {
 		return bind_data.direct_person_parquet;
 	}
@@ -1753,226 +1745,132 @@ private:
 		return {LogicalType::DATE, LogicalType::TIMESTAMP_MS, LogicalType::BIGINT, LogicalType::BIGINT};
 	}
 
-	void AppendForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBuilders &builders) const {
-		for (idx_t forum_idx = start; forum_idx < end; forum_idx++) {
-			auto &forum = forums[forum_idx];
-			if (IsSnapshotRow(forum.creation_date)) {
-				AppendForumRow(builders.forums, forum);
-				builders.counts.forums++;
-				for (auto tag_id : forum.tags) {
-					AppendTimestampMsInt64Int32Row(builders.forum_tags, forum.creation_date, forum.id, tag_id);
-					builders.counts.forum_tags++;
-				}
-			} else if (IsInsertRow(forum.creation_date)) {
-				AppendForumInsertRow(builders.insert_forums, forum);
-				for (auto tag_id : forum.tags) {
-					AppendTimestampMsInt64Int32InsertRow(builders.insert_forum_tags, forum.creation_date, forum.id,
-					                                     tag_id);
-				}
+	void AppendForumEntity(const LdbcForum &forum, ForumChunkBuilders &builders) const {
+		if (IsSnapshotRow(forum.creation_date)) {
+			AppendForumRow(builders.forums, forum);
+			builders.counts.forums++;
+			for (auto tag_id : forum.tags) {
+				AppendTimestampMsInt64Int32Row(builders.forum_tags, forum.creation_date, forum.id, tag_id);
+				builders.counts.forum_tags++;
 			}
-			if (IsDeleteRow(forum.deletion_date, forum.explicitly_deleted)) {
-				AppendNodeDeleteRow(builders.delete_forums, forum.deletion_date, forum.id);
+		} else if (IsInsertRow(forum.creation_date)) {
+			AppendForumInsertRow(builders.insert_forums, forum);
+			for (auto tag_id : forum.tags) {
+				AppendTimestampMsInt64Int32InsertRow(builders.insert_forum_tags, forum.creation_date, forum.id, tag_id);
 			}
+		}
+		if (IsDeleteRow(forum.deletion_date, forum.explicitly_deleted)) {
+			AppendNodeDeleteRow(builders.delete_forums, forum.deletion_date, forum.id);
+		}
 
-			for (auto &membership : forum.memberships) {
-				if (IsSnapshotRow(membership.creation_date)) {
-					AppendTimestampMsInt64Int64Row(builders.forum_members, membership.creation_date,
-					                               membership.forum_id, membership.person_id);
-					builders.counts.forum_members++;
-				} else if (IsInsertRow(membership.creation_date)) {
-					AppendTimestampMsInt64Int64InsertRow(builders.insert_forum_members, membership.creation_date,
-					                                     membership.forum_id, membership.person_id);
-				}
-				if (IsDeleteRow(membership.deletion_date, membership.explicitly_deleted)) {
-					AppendEdgeDeleteRow(builders.delete_forum_members, membership.deletion_date, membership.forum_id,
-					                    membership.person_id);
-				}
+		for (auto &membership : forum.memberships) {
+			if (IsSnapshotRow(membership.creation_date)) {
+				AppendTimestampMsInt64Int64Row(builders.forum_members, membership.creation_date, membership.forum_id,
+				                               membership.person_id);
+				builders.counts.forum_members++;
+			} else if (IsInsertRow(membership.creation_date)) {
+				AppendTimestampMsInt64Int64InsertRow(builders.insert_forum_members, membership.creation_date,
+				                                     membership.forum_id, membership.person_id);
 			}
-
-			for (auto &post : forum.posts) {
-				if (IsSnapshotRow(post.creation_date)) {
-					AppendPostRow(builders.posts, post);
-					builders.counts.posts++;
-					for (auto tag_id : post.tags) {
-						AppendTimestampMsInt64Int32Row(builders.post_tags, post.creation_date, post.id, tag_id);
-						builders.counts.post_tags++;
-					}
-				} else if (IsInsertRow(post.creation_date)) {
-					AppendPostInsertRow(builders.insert_posts, post);
-					for (auto tag_id : post.tags) {
-						AppendTimestampMsInt64Int32InsertRow(builders.insert_post_tags, post.creation_date, post.id,
-						                                     tag_id);
-					}
-				}
-				if (IsDeleteRow(post.deletion_date, post.explicitly_deleted)) {
-					AppendNodeDeleteRow(builders.delete_posts, post.deletion_date, post.id);
-				}
-			}
-
-			for (auto &comment : forum.comments) {
-				if (IsSnapshotRow(comment.creation_date)) {
-					AppendCommentRow(builders.comments, comment);
-					builders.counts.comments++;
-					for (auto tag_id : comment.tags) {
-						AppendTimestampMsInt64Int32Row(builders.comment_tags, comment.creation_date, comment.id,
-						                               tag_id);
-						builders.counts.comment_tags++;
-					}
-				} else if (IsInsertRow(comment.creation_date)) {
-					AppendCommentInsertRow(builders.insert_comments, comment);
-					for (auto tag_id : comment.tags) {
-						AppendTimestampMsInt64Int32InsertRow(builders.insert_comment_tags, comment.creation_date,
-						                                     comment.id, tag_id);
-					}
-				}
-				if (IsDeleteRow(comment.deletion_date, comment.explicitly_deleted)) {
-					AppendNodeDeleteRow(builders.delete_comments, comment.deletion_date, comment.id);
-				}
-			}
-
-			for (auto &like : forum.post_likes) {
-				if (IsSnapshotRow(like.creation_date)) {
-					AppendTimestampMsInt64Int64Row(builders.post_likes, like.creation_date, like.person_id,
-					                               like.message_id);
-					builders.counts.post_likes++;
-				} else if (IsInsertRow(like.creation_date)) {
-					AppendTimestampMsInt64Int64InsertRow(builders.insert_post_likes, like.creation_date, like.person_id,
-					                                     like.message_id);
-				}
-				if (IsDeleteRow(like.deletion_date, like.explicitly_deleted)) {
-					AppendEdgeDeleteRow(builders.delete_post_likes, like.deletion_date, like.person_id,
-					                    like.message_id);
-				}
-			}
-
-			for (auto &like : forum.comment_likes) {
-				if (IsSnapshotRow(like.creation_date)) {
-					AppendTimestampMsInt64Int64Row(builders.comment_likes, like.creation_date, like.person_id,
-					                               like.message_id);
-					builders.counts.comment_likes++;
-				} else if (IsInsertRow(like.creation_date)) {
-					AppendTimestampMsInt64Int64InsertRow(builders.insert_comment_likes, like.creation_date,
-					                                     like.person_id, like.message_id);
-				}
-				if (IsDeleteRow(like.deletion_date, like.explicitly_deleted)) {
-					AppendEdgeDeleteRow(builders.delete_comment_likes, like.deletion_date, like.person_id,
-					                    like.message_id);
-				}
+			if (IsDeleteRow(membership.deletion_date, membership.explicitly_deleted)) {
+				AppendEdgeDeleteRow(builders.delete_forum_members, membership.deletion_date, membership.forum_id,
+				                    membership.person_id);
 			}
 		}
 	}
 
-	void MaterializeForumRange(const vector<LdbcForum> &forums, idx_t start, idx_t end, ForumChunkBatch &target) const {
-		ForumChunkBuilders builders(UseDirectForumParquet() ? &context : nullptr);
-		AppendForumRange(forums, start, end, builders);
-		target = builders.Finish();
+	void AppendPostEntity(const LdbcPost &post, ForumChunkBuilders &builders) const {
+		if (IsSnapshotRow(post.creation_date)) {
+			AppendPostRow(builders.posts, post);
+			builders.counts.posts++;
+			for (auto tag_id : post.tags) {
+				AppendTimestampMsInt64Int32Row(builders.post_tags, post.creation_date, post.id, tag_id);
+				builders.counts.post_tags++;
+			}
+		} else if (IsInsertRow(post.creation_date)) {
+			AppendPostInsertRow(builders.insert_posts, post);
+			for (auto tag_id : post.tags) {
+				AppendTimestampMsInt64Int32InsertRow(builders.insert_post_tags, post.creation_date, post.id, tag_id);
+			}
+		}
+		if (IsDeleteRow(post.deletion_date, post.explicitly_deleted)) {
+			AppendNodeDeleteRow(builders.delete_posts, post.deletion_date, post.id);
+		}
 	}
 
-	vector<ForumChunkBatch> MaterializeForumChunks(vector<LdbcForum> &forums) {
-		if (forums.empty()) {
-			return {};
-		}
-		auto worker_count = MinValue<idx_t>(bind_data.threads, forums.size());
-		vector<ForumChunkBatch> batches(worker_count);
-		if (worker_count <= 1) {
-			MaterializeForumRange(forums, 0, forums.size(), batches[0]);
-			return batches;
-		}
-
-		class LdbcForumMaterializeTask : public BaseExecutorTask {
-		public:
-			LdbcForumMaterializeTask(TaskExecutor &executor, LdbcLoadGenerator &loader, const vector<LdbcForum> &forums,
-			                         vector<ForumChunkBatch> &batches, std::atomic<idx_t> &next_range,
-			                         idx_t range_count)
-			    : BaseExecutorTask(executor), loader(loader), forums(forums), batches(batches), next_range(next_range),
-			      range_count(range_count) {
+	void AppendCommentEntity(const LdbcComment &comment, ForumChunkBuilders &builders) const {
+		if (IsSnapshotRow(comment.creation_date)) {
+			AppendCommentRow(builders.comments, comment);
+			builders.counts.comments++;
+			for (auto tag_id : comment.tags) {
+				AppendTimestampMsInt64Int32Row(builders.comment_tags, comment.creation_date, comment.id, tag_id);
+				builders.counts.comment_tags++;
 			}
-
-			void ExecuteTask() override {
-				while (true) {
-					auto range_idx = next_range.fetch_add(1);
-					if (range_idx >= range_count) {
-						break;
-					}
-					auto start = (forums.size() * range_idx) / range_count;
-					auto end = (forums.size() * (range_idx + 1)) / range_count;
-					loader.MaterializeForumRange(forums, start, end, batches[range_idx]);
-				}
+		} else if (IsInsertRow(comment.creation_date)) {
+			AppendCommentInsertRow(builders.insert_comments, comment);
+			for (auto tag_id : comment.tags) {
+				AppendTimestampMsInt64Int32InsertRow(builders.insert_comment_tags, comment.creation_date, comment.id,
+				                                     tag_id);
 			}
-
-			string TaskType() const override {
-				return "LdbcForumMaterializeTask";
-			}
-
-		private:
-			LdbcLoadGenerator &loader;
-			const vector<LdbcForum> &forums;
-			vector<ForumChunkBatch> &batches;
-			std::atomic<idx_t> &next_range;
-			idx_t range_count;
-		};
-
-		std::atomic<idx_t> next_range(0);
-		TaskExecutor executor(context);
-		for (idx_t worker_idx = 0; worker_idx < worker_count; worker_idx++) {
-			executor.ScheduleTask(
-			    make_uniq<LdbcForumMaterializeTask>(executor, *this, forums, batches, next_range, worker_count));
 		}
-		executor.WorkOnTasks();
-		return batches;
+		if (IsDeleteRow(comment.deletion_date, comment.explicitly_deleted)) {
+			AppendNodeDeleteRow(builders.delete_comments, comment.deletion_date, comment.id);
+		}
 	}
 
-	void MaterializeForumBlock(idx_t block_id, idx_t block_start, idx_t block_end, vector<LdbcForum> &forums) {
-		(void)block_start;
-		(void)block_end;
-		ForumChunkBatch batch;
-		MaterializeForumRange(forums, 0, forums.size(), batch);
-		forums.clear();
-		forums.shrink_to_fit();
-		if (UseDirectForumParquet()) {
-			WriteForumSnapshotParquetBlock(block_id, batch);
+	void AppendLikeEntity(const LdbcLike &like, bool comment_like, ForumChunkBuilders &builders) const {
+		auto &snapshot_builder = comment_like ? builders.comment_likes : builders.post_likes;
+		auto &insert_builder = comment_like ? builders.insert_comment_likes : builders.insert_post_likes;
+		auto &delete_builder = comment_like ? builders.delete_comment_likes : builders.delete_post_likes;
+		auto &snapshot_count = comment_like ? builders.counts.comment_likes : builders.counts.post_likes;
+		if (IsSnapshotRow(like.creation_date)) {
+			AppendTimestampMsInt64Int64Row(snapshot_builder, like.creation_date, like.person_id, like.message_id);
+			snapshot_count++;
+		} else if (IsInsertRow(like.creation_date)) {
+			AppendTimestampMsInt64Int64InsertRow(insert_builder, like.creation_date, like.person_id, like.message_id);
 		}
-		QueueMaterializedForumBatch(block_id, std::move(batch));
+		if (IsDeleteRow(like.deletion_date, like.explicitly_deleted)) {
+			AppendEdgeDeleteRow(delete_builder, like.deletion_date, like.person_id, like.message_id);
+		}
 	}
 
-	void MaterializeForumSlice(idx_t slice_id, idx_t slice_start, idx_t slice_end, vector<LdbcForum> &forums,
-	                           bool finished) {
-		(void)slice_start;
-		(void)slice_end;
-		ForumChunkBuilders *builders;
-		{
-			std::lock_guard<std::mutex> lock(active_forum_chunk_builders_lock);
-			auto entry = active_forum_chunk_builders.find(slice_id);
-			if (entry == active_forum_chunk_builders.end()) {
-				auto snapshot_context = UseDirectForumParquet() ? &context : nullptr;
-				auto result =
-				    active_forum_chunk_builders.emplace(slice_id, make_uniq<ForumChunkBuilders>(snapshot_context));
-				entry = result.first;
-			}
-			builders = entry->second.get();
+	class DirectForumOutputSink final : public LdbcForumOutputSink {
+	public:
+		DirectForumOutputSink(LdbcLoadGenerator &loader_p, idx_t slice_id_p)
+		    : loader(loader_p), slice_id(slice_id_p), builders(&loader.context) {
 		}
-		AppendForumRange(forums, 0, forums.size(), *builders);
-		forums.clear();
-		if (!finished) {
-			return;
+
+		void AppendForum(const LdbcForum &forum) override {
+			loader.AppendForumEntity(forum, builders);
 		}
-		unique_ptr<ForumChunkBuilders> completed_builders;
-		{
-			std::lock_guard<std::mutex> lock(active_forum_chunk_builders_lock);
-			auto entry = active_forum_chunk_builders.find(slice_id);
-			if (entry == active_forum_chunk_builders.end()) {
-				throw InternalException("Missing forum slice builders for slice %llu",
-				                        static_cast<unsigned long long>(slice_id));
-			}
-			completed_builders = std::move(entry->second);
-			active_forum_chunk_builders.erase(entry);
+
+		void AppendPost(const LdbcPost &post) override {
+			loader.AppendPostEntity(post, builders);
 		}
-		auto batch = completed_builders->Finish();
-		if (UseDirectForumParquet()) {
-			WriteForumSnapshotParquetBlock(slice_id, batch);
+
+		void AppendComment(const LdbcComment &comment) override {
+			loader.AppendCommentEntity(comment, builders);
 		}
-		QueueMaterializedForumBatch(slice_id, std::move(batch));
-	}
+
+		void AppendPostLike(const LdbcLike &like) override {
+			loader.AppendLikeEntity(like, false, builders);
+		}
+
+		void AppendCommentLike(const LdbcLike &like) override {
+			loader.AppendLikeEntity(like, true, builders);
+		}
+
+		void Finish() override {
+			auto batch = builders.Finish();
+			loader.WriteForumSnapshotParquetBlock(slice_id, batch);
+			loader.QueueMaterializedForumBatch(slice_id, std::move(batch));
+		}
+
+	private:
+		LdbcLoadGenerator &loader;
+		idx_t slice_id;
+		ForumChunkBuilders builders;
+	};
 
 	void QueueMaterializedForumBatch(idx_t block_id, ForumChunkBatch batch) {
 		std::lock_guard<std::mutex> lock(pending_forum_chunk_batches_lock);
@@ -2638,21 +2536,15 @@ private:
 		if (!forum_generator) {
 			std::function<void(LdbcForum && forum)> append_forum;
 			auto use_prematerialized_chunks = UsePrematerializedForumChunks();
-			auto use_block_prematerialization = UseForumBlockPrematerialization();
-			LdbcForumGenerator::BlockCallback block_callback;
-			LdbcForumGenerator::SliceCallback slice_callback;
+			LdbcForumGenerator::OutputSinkFactory output_sink_factory;
 			if (!use_prematerialized_chunks) {
 				append_forum = [&](LdbcForum &&forum) {
 					AppendForum(forum);
 				};
 			}
-			if (use_block_prematerialization) {
-				block_callback = [&](idx_t block_id, idx_t block_start, idx_t block_end, vector<LdbcForum> &forums) {
-					MaterializeForumBlock(block_id, block_start, block_end, forums);
-				};
-				slice_callback = [&](idx_t slice_id, idx_t slice_start, idx_t slice_end, vector<LdbcForum> &forums,
-				                     bool finished) {
-					MaterializeForumSlice(slice_id, slice_start, slice_end, forums, finished);
+			if (use_prematerialized_chunks) {
+				output_sink_factory = [&](idx_t slice_id) {
+					return make_uniq<DirectForumOutputSink>(*this, slice_id);
 				};
 			}
 			forum_generator = make_uniq<LdbcForumGenerator>(
@@ -2660,22 +2552,16 @@ private:
 			    [&](idx_t done, idx_t total) {
 				    SetLdbcGenProgress(&progress_state, LdbcGenProgressRange(65.0, 98.0, done, total));
 			    },
-			    bind_data.threads, &context, block_callback, slice_callback);
+			    bind_data.threads, &context, output_sink_factory);
 			knows_edges.clear();
 			knows_edges.shrink_to_fit();
 		}
 		auto done = forum_generator->GenerateNext(8);
-		if (UseForumBlockPrematerialization()) {
+		if (UsePrematerializedForumChunks()) {
 			DrainForumChunkBatches();
-		} else if (UsePrematerializedForumChunks()) {
-			auto forums = forum_generator->ReleaseForums();
-			auto batches = MaterializeForumChunks(forums);
-			for (auto &batch : batches) {
-				AppendForumChunkBatch(batch);
-			}
 		}
 		if (done) {
-			if (UseForumBlockPrematerialization()) {
+			if (UsePrematerializedForumChunks()) {
 				DrainForumChunkBatches();
 			}
 			SetLdbcGenProgress(&progress_state, 98.0);
@@ -2853,8 +2739,6 @@ private:
 	idx_t knows_idx = 0;
 	unique_ptr<LdbcKnowsGenerator> knows_generator;
 	unique_ptr<LdbcForumGenerator> forum_generator;
-	std::mutex active_forum_chunk_builders_lock;
-	unordered_map<idx_t, unique_ptr<ForumChunkBuilders>> active_forum_chunk_builders;
 	std::mutex pending_forum_chunk_batches_lock;
 	unordered_map<idx_t, ForumChunkBatch> pending_forum_chunk_batches;
 	idx_t next_forum_chunk_block = 0;
