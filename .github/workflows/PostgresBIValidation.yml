@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Check out extension
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Check out pinned LDBC BI queries
         uses: actions/checkout@v4
@@ -42,45 +44,41 @@ jobs:
           ref: 47dd38b40844ecdb0e42e5a610c369535304786d
           path: .cache/ldbc_snb_bi
 
-      - name: Install PostgreSQL client and zstd
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client zstd
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build postgresql-client
 
-      - name: Cache official Spark SF1 archive
+      - name: Cache compiler output
         uses: actions/cache@v4
         with:
-          path: .cache/bi-validation/downloads
-          key: ldbc-bi-spark-sf1-a72938e244e6aa9d
+          path: ~/.cache/ccache
+          key: postgres-bi-${{ runner.os }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'extension_config.cmake', 'duckdb/CMakeLists.txt') }}
+          restore-keys: |
+            postgres-bi-${{ runner.os }}-
 
-      - name: Download and verify official Spark SF1 data
+      - name: Build release extension
+        run: GEN=ninja make release
+
+      - name: Generate SF1 data
         run: |
-          mkdir -p .cache/bi-validation/downloads
-          archive=.cache/bi-validation/downloads/bi-sf1-composite-merged-fk.tar.zst
-          if [ ! -f "$archive" ]; then
-            curl --fail --location --retry 3 \
-              --output "$archive" \
-              https://datasets.ldbcouncil.org/snb-bi/bi-sf1-composite-merged-fk.tar.zst
-          fi
-          echo "a72938e244e6aa9d99632fcd5065e50c669ecf4d00f60bd162b266df4a7aba13  $archive" \
-            | sha256sum --check
+          ./build/release/duckdb -c "
+            CALL ldbcgen(
+              sf := 1,
+              target := 'files',
+              format := 'parquet',
+              output_dir := '.cache/bi-validation/generated-sf1',
+              overwrite := true
+            );
+          "
 
-      - name: Extract the initial snapshot
-        run: |
-          mkdir -p .cache/bi-validation/data
-          tar --use-compress-program=unzstd \
-            --extract \
-            --file .cache/bi-validation/downloads/bi-sf1-composite-merged-fk.tar.zst \
-            --directory .cache/bi-validation/data \
-            bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot
-
-      - name: Load official Spark data into PostgreSQL
+      - name: Load generated data into PostgreSQL
         env:
           PGPASSWORD: postgres
         run: |
           python3 tools/postgres_bi_loader.py \
             --dsn postgresql://postgres@localhost:5432/postgres \
             --schema ldbc_bi_sf1 \
-            --snapshot .cache/bi-validation/data/bi-sf1-composite-merged-fk/graphs/csv/bi/composite-merged-fk/initial_snapshot \
-            --format csv
+            --snapshot .cache/bi-validation/generated-sf1/graphs/parquet/bi/composite-merged-fk/initial_snapshot \
+            --format parquet
 
       - name: Regenerate and compare all BI query results
         env:
