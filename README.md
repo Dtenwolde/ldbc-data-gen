@@ -42,12 +42,6 @@ SELECT count(*) AS persons
 FROM ldbc.Person;
 ```
 
-The repository's DuckDB binary has the extension statically available, so `LOAD ldbc_data_gen` is sufficient. To use another compatible DuckDB build, start its shell with `-unsigned` and load the compiled extension explicitly:
-
-```sh
-duckdb -unsigned ldbc.duckdb
-```
-
 ```sql
 LOAD '/absolute/path/to/ldbc-data-gen/build/release/extension/ldbc_data_gen/ldbc_data_gen.duckdb_extension';
 ```
@@ -149,8 +143,6 @@ An SF100 BI Parquet dataset completes with the default DuckDB thread count on a 
 | SF | Threads | Wall time | Peak RSS | Output | Parquet files |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 100 | 18 (default) | 2:40 | 10.7 GiB | 20 GiB | 9,517 |
-
-This local release-build result was measured on an 18-core Apple M5 Max with DuckDB `v1.6.0-dev10569`, using the current working tree based on extension commit `308909b`. Unrelated builds were active on the host, so the elapsed time is an indicative capability result rather than a controlled comparison. SF1 file output matched all 18 canonical relation checksums after the same direct-chunk change. See [the performance notes](docs/performance.md) for the command, measurement details, and historical results.
 
 ## BI Queries
 

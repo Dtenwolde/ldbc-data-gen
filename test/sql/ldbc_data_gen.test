@@ -578,7 +578,7 @@ FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-parquet'
 
 query I
 SELECT COUNT(*)
-FROM read_parquet('out/sf0.003-parquet/dynamic/Person.parquet');
+FROM read_parquet('out/sf0.003-parquet/graphs/parquet/bi/composite-merged-fk/initial_snapshot/dynamic/Person/*.parquet');
 ----
 50
 
