@@ -798,9 +798,9 @@ int32_t LdbcTagTextDictionary::GetRandomLargeTextSize(LdbcJavaRandom &random_tex
 }
 
 LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
-                                                      int32_t text_size) const {
+	int32_t text_size) const {
 	if (tag_ids.empty()) {
-		return {};
+		return LdbcGeneratedText();
 	}
 
 	string result;
@@ -851,13 +851,13 @@ LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_tex
 	if (result.find('|') != string::npos) {
 		result = StringUtil::Replace(result, "|", " ");
 	}
-	return {std::move(result), result_length};
+	return LdbcGeneratedText(std::move(result), result_length);
 }
 
 LdbcGeneratedText LdbcTagTextDictionary::ConsumeText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
                                                      int32_t text_size) const {
 	if (tag_ids.empty()) {
-		return {};
+		return LdbcGeneratedText();
 	}
 	int32_t result_length = 0;
 	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
@@ -888,7 +888,7 @@ LdbcGeneratedText LdbcTagTextDictionary::ConsumeText(LdbcJavaRandom &random_text
 			}
 		}
 	}
-	return {{}, std::min<int32_t>(result_length, text_size)};
+	return LdbcGeneratedText(string(), std::min<int32_t>(result_length, text_size));
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {

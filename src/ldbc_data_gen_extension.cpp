@@ -854,6 +854,14 @@ public:
 		chunk.Initialize(Allocator::DefaultAllocator(), types);
 	}
 
+	LdbcChunkAppender(const LdbcChunkAppender &) = delete;
+	LdbcChunkAppender &operator=(const LdbcChunkAppender &) = delete;
+
+	LdbcChunkAppender(LdbcChunkAppender &&other) : appender(std::move(other.appender)), row(other.row) {
+		chunk.Move(other.chunk);
+		other.row = 0;
+	}
+
 	void AppendTimestamp(idx_t column, idx_t row_index, timestamp_t value) {
 		FlatVector::GetData<timestamp_ms_t>(chunk.data[column])[row_index] =
 		    timestamp_ms_t(Timestamp::GetEpochMs(value));

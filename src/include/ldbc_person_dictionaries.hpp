@@ -135,8 +135,15 @@ private:
 };
 
 struct LdbcGeneratedText {
+	LdbcGeneratedText() : java_length(0) {
+	}
+
+	LdbcGeneratedText(string content_p, int32_t java_length_p)
+	    : content(std::move(content_p)), java_length(java_length_p) {
+	}
+
 	string content;
-	int32_t java_length = 0;
+	int32_t java_length;
 };
 
 class LdbcTagTextDictionary {
