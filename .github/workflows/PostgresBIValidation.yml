@@ -1,6 +1,10 @@
 name: PostgreSQL BI Validation
 
 on:
+  push:
+    branches:
+      - main
+      - v1.5-variegata
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
@@ -99,4 +103,3 @@ jobs:
           name: postgres-sf1-results
           path: postgres-sf1-results.json
           if-no-files-found: ignore
-
