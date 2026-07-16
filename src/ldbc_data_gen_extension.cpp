@@ -6,6 +6,7 @@
 #include "ldbc_gen.hpp"
 #include "ldbc_java_random.hpp"
 #include "ldbc_person_generator.hpp"
+#include "ldbc_resources.hpp"
 #include "ldbc_unicode.hpp"
 #include "duckdb.hpp"
 #include "duckdb/catalog/catalog.hpp"
@@ -41,7 +42,6 @@
 #include "duckdb/common/windows_undefs.hpp"
 
 #include <atomic>
-#include <fstream>
 #include <iomanip>
 #include <limits>
 #include <mutex>
@@ -190,7 +190,7 @@ struct LdbcGenBindData : public TableFunctionData {
 	string target = "tables";
 	string schema = "main";
 	string format = "parquet";
-	string dictionary_dir = "third_party/ldbc_snb_datagen_spark/src/main/resources/dictionaries";
+	string dictionary_dir = "embedded/dictionaries";
 	idx_t threads = 1;
 	bool overwrite = false;
 	bool primary_keys = false;
@@ -616,23 +616,8 @@ static void CreateLdbcDeleteTable(ClientContext &context, const LdbcGenBindData 
 	Catalog::GetCatalog(context, bind_data.catalog).CreateTable(context, std::move(table_info));
 }
 
-static string DictionaryPath(const LdbcGenBindData &bind_data, const string &file_name) {
-	if (bind_data.dictionary_dir.empty()) {
-		throw InvalidInputException("ldbcgen parameter dictionary_dir must not be empty");
-	}
-	if (bind_data.dictionary_dir.back() == '/') {
-		return bind_data.dictionary_dir + file_name;
-	}
-	return bind_data.dictionary_dir + "/" + file_name;
-}
-
-static std::ifstream OpenDictionaryFile(const LdbcGenBindData &bind_data, const string &file_name) {
-	auto path = DictionaryPath(bind_data, file_name);
-	std::ifstream file(path);
-	if (!file.is_open()) {
-		throw IOException("Could not open LDBC dictionary file '%s'", path);
-	}
-	return file;
+static LdbcResource OpenDictionaryFile(const LdbcGenBindData &bind_data, const string &file_name) {
+	return LdbcOpenResourcePath(LdbcResourcePath(bind_data.dictionary_dir, file_name));
 }
 
 static string ResourceDirFromDictionaryDir(const string &dictionary_dir) {
@@ -738,7 +723,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 	unordered_map<string, int32_t> continent_ids;
 
 	string line;
-	auto locations = OpenDictionaryFile(bind_data, "dicLocations.txt");
+	auto locations_resource = OpenDictionaryFile(bind_data, "dicLocations.txt");
+	auto &locations = *locations_resource.stream;
 	while (std::getline(locations, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -756,7 +742,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 		}
 	}
 
-	auto cities = OpenDictionaryFile(bind_data, "citiesByCountry.txt");
+	auto cities_resource = OpenDictionaryFile(bind_data, "citiesByCountry.txt");
+	auto &cities = *cities_resource.stream;
 	while (std::getline(cities, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -774,8 +761,9 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 		}
 	}
 
-	locations = OpenDictionaryFile(bind_data, "dicLocations.txt");
-	while (std::getline(locations, line)) {
+	locations_resource = OpenDictionaryFile(bind_data, "dicLocations.txt");
+	auto &locations_again = *locations_resource.stream;
+	while (std::getline(locations_again, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
 			continue;
@@ -793,7 +781,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 		data.places[data.country_ids[columns[1]]].part_of_place_id = continent_ids[continent];
 	}
 
-	auto tag_classes = OpenDictionaryFile(bind_data, "tagClasses.txt");
+	auto tag_classes_resource = OpenDictionaryFile(bind_data, "tagClasses.txt");
+	auto &tag_classes = *tag_classes_resource.stream;
 	while (std::getline(tag_classes, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -806,7 +795,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 		data.tag_class_names[std::stoi(columns[0])] = columns[1];
 	}
 
-	auto tag_hierarchy = OpenDictionaryFile(bind_data, "tagClassHierarchy.txt");
+	auto tag_hierarchy_resource = OpenDictionaryFile(bind_data, "tagClassHierarchy.txt");
+	auto &tag_hierarchy = *tag_hierarchy_resource.stream;
 	while (std::getline(tag_hierarchy, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -819,7 +809,8 @@ static StaticDictionaryData LoadStaticDictionaryData(const LdbcGenBindData &bind
 		data.tag_class_parent[std::stoi(columns[0])] = std::stoi(columns[1]);
 	}
 
-	auto tags = OpenDictionaryFile(bind_data, "tags.txt");
+	auto tags_resource = OpenDictionaryFile(bind_data, "tags.txt");
+	auto &tags = *tags_resource.stream;
 	while (std::getline(tags, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -1403,7 +1394,8 @@ static idx_t AppendOrganisations(ClientContext &context, const LdbcGenBindData &
 	idx_t row_count = 0;
 	string line;
 
-	auto companies = OpenDictionaryFile(bind_data, "companiesByCountry.txt");
+	auto companies_resource = OpenDictionaryFile(bind_data, "companiesByCountry.txt");
+	auto &companies = *companies_resource.stream;
 	while (std::getline(companies, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {
@@ -1428,7 +1420,8 @@ static idx_t AppendOrganisations(ClientContext &context, const LdbcGenBindData &
 		row_count++;
 	}
 
-	auto universities = OpenDictionaryFile(bind_data, "universities.txt");
+	auto universities_resource = OpenDictionaryFile(bind_data, "universities.txt");
+	auto &universities = *universities_resource.stream;
 	while (std::getline(universities, line)) {
 		line = StripCarriageReturn(line);
 		if (line.empty()) {

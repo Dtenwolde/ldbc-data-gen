@@ -236,6 +236,4 @@ public:
 	LdbcUniversityDictionary universities;
 };
 
-string LdbcResourcePath(const string &base, const string &path);
-
 } // namespace duckdb

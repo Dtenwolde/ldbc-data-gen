@@ -74,7 +74,8 @@ struct LdbcDatagenConfig {
 	double prob_like_deleted;
 	double bulkload_portion = 0.97;
 
-	static constexpr const char *DEFAULT_RESOURCE_DIR = "third_party/ldbc_snb_datagen_spark/src/main/resources";
+	static constexpr const char *EMBEDDED_RESOURCE_DIR = "embedded";
+	static constexpr const char *DEFAULT_RESOURCE_DIR = EMBEDDED_RESOURCE_DIR;
 	static constexpr double ALPHA = 0.4;
 
 	static LdbcDatagenConfig Load(double scale_factor, const string &resource_dir = DEFAULT_RESOURCE_DIR);

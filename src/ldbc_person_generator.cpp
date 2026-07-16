@@ -1,5 +1,6 @@
 #include "ldbc_person_generator.hpp"
 
+#include "ldbc_resources.hpp"
 #include "ldbc_unicode.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -10,7 +11,6 @@
 #include <atomic>
 #include <cmath>
 #include <exception>
-#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
@@ -180,11 +180,8 @@ LdbcFacebookDegreeDistribution::LdbcFacebookDegreeDistribution(const LdbcDatagen
 	if (config.degree_distribution != "Facebook") {
 		throw InvalidInputException("Only the Facebook LDBC degree distribution is currently supported");
 	}
-	auto path = LdbcResourcePath(LdbcResourcePath(config.resource_dir, "dictionaries"), "facebookBucket100.dat");
-	std::ifstream file(path);
-	if (!file.is_open()) {
-		throw IOException("Could not open LDBC degree distribution file '%s'", path);
-	}
+	auto resource = LdbcOpenResource(config.resource_dir, "dictionaries", "facebookBucket100.dat");
+	auto &file = *resource.stream;
 
 	auto mean = std::round(std::pow(static_cast<double>(config.num_persons),
 	                                0.512 - 0.028 * std::log10(static_cast<double>(config.num_persons))));
@@ -955,11 +952,8 @@ static double PowerDistributionDouble(LdbcJavaRandom &random, double min_value, 
 class LdbcActivityDeleteDistribution {
 public:
 	explicit LdbcActivityDeleteDistribution(const string &resource_dir) {
-		auto path = LdbcResourcePath(LdbcResourcePath(resource_dir, "dictionaries"), "powerLawActivityDeleteDate.txt");
-		std::ifstream file(path);
-		if (!file.is_open()) {
-			throw IOException("Could not open LDBC activity delete distribution file '%s'", path);
-		}
+		auto resource = LdbcOpenResource(resource_dir, "dictionaries", "powerLawActivityDeleteDate.txt");
+		auto &file = *resource.stream;
 		string line;
 		while (std::getline(file, line)) {
 			if (!line.empty() && line.back() == '\r') {
@@ -1262,11 +1256,8 @@ private:
 class LdbcFlashmobDateDistribution {
 public:
 	explicit LdbcFlashmobDateDistribution(const string &resource_dir) {
-		auto path = LdbcResourcePath(LdbcResourcePath(resource_dir, "dictionaries"), "flashmobDist.txt");
-		std::ifstream file(path);
-		if (!file.is_open()) {
-			throw IOException("Could not open LDBC flashmob distribution file '%s'", path);
-		}
+		auto resource = LdbcOpenResource(resource_dir, "dictionaries", "flashmobDist.txt");
+		auto &file = *resource.stream;
 		string line;
 		while (std::getline(file, line)) {
 			if (!line.empty() && line.back() == '\r') {
@@ -1304,11 +1295,8 @@ public:
 		for (auto country_id : places.GetCountries()) {
 			popular_place_counts[country_id] = 0;
 		}
-		auto path = LdbcResourcePath(dictionary_dir, "popularPlacesByCountry.txt");
-		std::ifstream file(path);
-		if (!file.is_open()) {
-			throw IOException("Could not open LDBC popular places file '%s'", path);
-		}
+		auto resource = LdbcOpenResourcePath(LdbcResourcePath(dictionary_dir, "popularPlacesByCountry.txt"));
+		auto &file = *resource.stream;
 		string line;
 		while (std::getline(file, line)) {
 			if (!line.empty() && line.back() == '\r') {

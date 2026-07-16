@@ -1,5 +1,6 @@
 #include "ldbc_person_dictionaries.hpp"
 
+#include "ldbc_resources.hpp"
 #include "ldbc_unicode.hpp"
 
 #include "duckdb/common/exception.hpp"
@@ -7,7 +8,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -78,13 +78,8 @@ static vector<string> SplitByDelimiterLocal(const string &line, const string &de
 	}
 }
 
-static std::ifstream OpenDictionaryPath(const string &dictionary_dir, const string &file_name) {
-	auto path = LdbcResourcePath(dictionary_dir, file_name);
-	std::ifstream file(path);
-	if (!file.is_open()) {
-		throw IOException("Could not open LDBC dictionary file '%s'", path);
-	}
-	return file;
+static LdbcResource OpenDictionaryPath(const string &dictionary_dir, const string &file_name) {
+	return LdbcOpenResourcePath(LdbcResourcePath(dictionary_dir, file_name));
 }
 
 static int32_t JavaRoundToInt(double value) {
@@ -104,18 +99,9 @@ static int32_t ZOrderValue(int32_t x, int32_t y) {
 
 } // namespace
 
-string LdbcResourcePath(const string &base, const string &path) {
-	if (base.empty()) {
-		throw InvalidInputException("LDBC resource path base must not be empty");
-	}
-	if (base.back() == '/') {
-		return base + path;
-	}
-	return base + "/" + path;
-}
-
 LdbcBrowserDictionary::LdbcBrowserDictionary(const string &dictionary_dir) {
-	auto file = OpenDictionaryPath(dictionary_dir, "browsersDic.txt");
+	auto resource = OpenDictionaryPath(dictionary_dir, "browsersDic.txt");
+	auto &file = *resource.stream;
 	string line;
 	double cumulative = 0.0;
 	while (std::getline(file, line)) {
@@ -152,7 +138,8 @@ const string &LdbcBrowserDictionary::GetName(int32_t id) const {
 }
 
 LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
-	auto locations = OpenDictionaryPath(dictionary_dir, "dicLocations.txt");
+	auto locations_resource = OpenDictionaryPath(dictionary_dir, "dicLocations.txt");
+	auto &locations = *locations_resource.stream;
 	string line;
 	vector<std::pair<int32_t, int32_t>> zorder_by_country;
 	while (std::getline(locations, line)) {
@@ -187,7 +174,8 @@ LdbcPlaceDictionary::LdbcPlaceDictionary(const string &dictionary_dir) {
 		place_id_by_zorder.push_back(zorder_by_country[zorder_id].first);
 	}
 
-	auto cities = OpenDictionaryPath(dictionary_dir, "citiesByCountry.txt");
+	auto cities_resource = OpenDictionaryPath(dictionary_dir, "citiesByCountry.txt");
+	auto &cities = *cities_resource.stream;
 	int32_t next_place_id = NumericCast<int32_t>(countries.size());
 	while (std::getline(cities, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -280,7 +268,8 @@ int32_t LdbcPlaceDictionary::GetPlaceIdFromZOrder(int32_t zorder_id) const {
 
 LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, const LdbcPlaceDictionary &places) {
 	unordered_map<string, string> country_abbreviations;
-	auto mapping = OpenDictionaryPath(LdbcResourcePath(resource_dir, "dictionaries"), "countryAbbrMapping.txt");
+	auto mapping_resource = OpenDictionaryPath(LdbcResourcePath(resource_dir, "dictionaries"), "countryAbbrMapping.txt");
+	auto &mapping = *mapping_resource.stream;
 	string line;
 	while (std::getline(mapping, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -304,12 +293,9 @@ LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, con
 			throw InvalidInputException("Missing IP country abbreviation for '%s'", country_name);
 		}
 
-		auto zone_path =
-		    LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
-		std::ifstream zone_file(zone_path);
-		if (!zone_file.is_open()) {
-			throw IOException("Could not open LDBC IP zone file '%s'", zone_path);
-		}
+		auto zone_file_resource = LdbcOpenResource(resource_dir, "ipaddrByCountries", abbreviation->second + ".zone");
+		auto zone_path = zone_file_resource.path;
+		auto &zone_file = *zone_file_resource.stream;
 
 		auto &networks = ips_by_country[country_id];
 		idx_t zone_count = 0;
@@ -358,7 +344,8 @@ LdbcLanguageDictionary::LdbcLanguageDictionary(const string &dictionary_dir, con
 		languages_by_country[country_id] = vector<int32_t>();
 	}
 
-	auto file = OpenDictionaryPath(dictionary_dir, "languagesByCountry.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "languagesByCountry.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -469,7 +456,8 @@ LdbcNamesDictionary::LdbcNamesDictionary(const string &dictionary_dir, const Ldb
 		}
 	}
 
-	auto surnames = OpenDictionaryPath(dictionary_dir, "surnameByCountryBirthPlace.txt.freq.sort");
+	auto surnames_resource = OpenDictionaryPath(dictionary_dir, "surnameByCountryBirthPlace.txt.freq.sort");
+	auto &surnames = *surnames_resource.stream;
 	string line;
 	while (std::getline(surnames, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -490,7 +478,8 @@ LdbcNamesDictionary::LdbcNamesDictionary(const string &dictionary_dir, const Ldb
 		surnames_by_country[country_id].push_back(TrimWhitespaceLocal(line.substr(second_comma + 1)));
 	}
 
-	auto given_names = OpenDictionaryPath(dictionary_dir, "givennameByCountryBirthPlace.txt.freq.full");
+	auto given_names_resource = OpenDictionaryPath(dictionary_dir, "givennameByCountryBirthPlace.txt.freq.full");
+	auto &given_names = *given_names_resource.stream;
 	while (std::getline(given_names, line)) {
 		line = StripCarriageReturnLocal(line);
 		if (line.empty()) {
@@ -581,7 +570,8 @@ string LdbcNamesDictionary::GetRandomSurname(LdbcJavaRandom &random, int32_t cou
 }
 
 LdbcEmailDictionary::LdbcEmailDictionary(const string &dictionary_dir) {
-	auto file = OpenDictionaryPath(dictionary_dir, "email.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "email.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	double cumulative = 0.0;
 	while (std::getline(file, line)) {
@@ -629,7 +619,8 @@ string LdbcEmailDictionary::GetRandomEmail(LdbcJavaRandom &random_top, LdbcJavaR
 }
 
 LdbcPersonDeleteDistribution::LdbcPersonDeleteDistribution(const string &dictionary_dir) {
-	auto file = OpenDictionaryPath(dictionary_dir, "personDelete.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "personDelete.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -653,7 +644,8 @@ bool LdbcPersonDeleteDistribution::IsDeleted(LdbcJavaRandom &random, int64_t max
 LdbcTagDictionary::LdbcTagDictionary(const string &dictionary_dir, idx_t country_count, double tag_country_corr_prob)
     : tag_country_corr_prob(tag_country_corr_prob), tags_by_country(country_count),
       cumulative_distribution_by_country(country_count) {
-	auto tags_file = OpenDictionaryPath(dictionary_dir, "tags.txt");
+	auto tags_file_resource = OpenDictionaryPath(dictionary_dir, "tags.txt");
+	auto &tags_file = *tags_file_resource.stream;
 	string line;
 	while (std::getline(tags_file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -671,7 +663,8 @@ LdbcTagDictionary::LdbcTagDictionary(const string &dictionary_dir, idx_t country
 		tag_names[tag_id] = columns[2];
 	}
 
-	auto file = OpenDictionaryPath(dictionary_dir, "popularTagByCountry.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "popularTagByCountry.txt");
+	auto &file = *file_resource.stream;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
 		if (line.empty()) {
@@ -738,7 +731,8 @@ const string &LdbcTagDictionary::GetName(int32_t tag_id) const {
 }
 
 LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const LdbcTagDictionary &tags) : tags(tags) {
-	auto file = OpenDictionaryPath(dictionary_dir, "tagText.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "tagText.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -892,7 +886,8 @@ LdbcGeneratedText LdbcTagTextDictionary::ConsumeText(LdbcJavaRandom &random_text
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {
-	auto file = OpenDictionaryPath(dictionary_dir, "tagMatrix.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "tagMatrix.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -960,7 +955,8 @@ LdbcCompanyDictionary::LdbcCompanyDictionary(const string &dictionary_dir, const
                                              double prob_uncorrelated_company)
     : places(places), prob_uncorrelated_company(prob_uncorrelated_company),
       companies_by_country(places.GetCountries().size()) {
-	auto file = OpenDictionaryPath(dictionary_dir, "companiesByCountry.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "companiesByCountry.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	while (std::getline(file, line)) {
 		line = StripCarriageReturnLocal(line);
@@ -1004,7 +1000,8 @@ LdbcUniversityDictionary::LdbcUniversityDictionary(const string &dictionary_dir,
     : places(places), prob_uncorrelated_university(prob_uncorrelated_university),
       prob_top_university(prob_top_university), start_index(start_index),
       universities_by_country(places.GetCountries().size()) {
-	auto file = OpenDictionaryPath(dictionary_dir, "universities.txt");
+	auto file_resource = OpenDictionaryPath(dictionary_dir, "universities.txt");
+	auto &file = *file_resource.stream;
 	string line;
 	int64_t next_university_id = start_index;
 	while (std::getline(file, line)) {

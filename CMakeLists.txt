@@ -22,6 +22,9 @@ include_directories(duckdb/third_party/snappy)
 include_directories(duckdb/third_party/lz4)
 include_directories(duckdb/third_party/brotli/include)
 
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
 set(LDBC_BI_QUERY_DEFINITIONS "")
 foreach(QUERY_NUMBER RANGE 1 20)
   set(QUERY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/queries/bi-${QUERY_NUMBER}.sql")
@@ -34,14 +37,29 @@ file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 configure_file(src/include/ldbc_bi_queries_generated.hpp.in
                "${CMAKE_CURRENT_BINARY_DIR}/generated/ldbc_bi_queries_generated.hpp" @ONLY)
 
+set(LDBC_RESOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ldbc_snb_datagen_spark/src/main/resources")
+file(GLOB_RECURSE LDBC_RESOURCE_FILES "${LDBC_RESOURCE_DIR}/*")
+set(LDBC_EMBEDDED_RESOURCES_CPP
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/ldbc_embedded_resources.cpp")
+add_custom_command(
+  OUTPUT "${LDBC_EMBEDDED_RESOURCES_CPP}"
+  COMMAND
+    "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_embedded_resources.py"
+    --resource-dir "${LDBC_RESOURCE_DIR}" --output "${LDBC_EMBEDDED_RESOURCES_CPP}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_embedded_resources.py" ${LDBC_RESOURCE_FILES}
+  VERBATIM)
+
 set(EXTENSION_SOURCES
     src/ldbc_data_gen_extension.cpp
     src/ldbc_bi_queries.cpp
     src/ldbc_java_random.cpp
     src/ldbc_datagen_config.cpp
+    src/ldbc_resources.cpp
     src/ldbc_unicode.cpp
     src/ldbc_person_dictionaries.cpp
-    src/ldbc_person_generator.cpp)
+    src/ldbc_person_generator.cpp
+    "${LDBC_EMBEDDED_RESOURCES_CPP}")
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})

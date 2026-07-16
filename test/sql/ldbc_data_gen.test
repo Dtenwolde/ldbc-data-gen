@@ -609,7 +609,7 @@ FROM glob('out/sf0.003-csv/.ldbcgen-staging-*');
 statement error
 CALL ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/staging-error', dictionary_dir := 'does-not-exist');
 ----
-IO Error: Could not open LDBC dictionary file 'does-not-exist/dicLocations.txt'
+IO Error: Could not open LDBC resource file 'does-not-exist/dicLocations.txt'
 
 query I
 SELECT COUNT(*)

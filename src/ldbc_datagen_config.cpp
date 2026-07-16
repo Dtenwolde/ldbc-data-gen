@@ -1,25 +1,15 @@
 #include "ldbc_datagen_config.hpp"
+#include "ldbc_resources.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 
-#include <fstream>
 #include <iomanip>
 #include <sstream>
 
 namespace duckdb {
 
 namespace {
-
-static string JoinPath(const string &base, const string &path) {
-	if (base.empty()) {
-		throw InvalidInputException("LDBC resource directory must not be empty");
-	}
-	if (base.back() == '/') {
-		return base + path;
-	}
-	return base + "/" + path;
-}
 
 static string Trim(const string &value) {
 	idx_t start = 0;
@@ -34,11 +24,8 @@ static string Trim(const string &value) {
 }
 
 static unordered_map<string, string> ReadDefaultProperties(const string &resource_dir) {
-	auto path = JoinPath(resource_dir, "params_default.ini");
-	std::ifstream input(path);
-	if (!input.is_open()) {
-		throw IOException("Could not open LDBC default parameter file '%s'", path);
-	}
+	auto resource = LdbcOpenResource(resource_dir, "params_default.ini");
+	auto &input = *resource.stream;
 
 	unordered_map<string, string> result;
 	string line;
@@ -49,26 +36,16 @@ static unordered_map<string, string> ReadDefaultProperties(const string &resourc
 		}
 		auto separator = line.find(':');
 		if (separator == string::npos) {
-			throw InvalidInputException("Malformed LDBC parameter line in '%s': '%s'", path, line);
+			throw InvalidInputException("Malformed LDBC parameter line in '%s': '%s'", resource.path, line);
 		}
 		auto key = Trim(line.substr(0, separator));
 		auto value = Trim(line.substr(separator + 1));
 		if (key.empty()) {
-			throw InvalidInputException("Malformed LDBC parameter line in '%s': '%s'", path, line);
+			throw InvalidInputException("Malformed LDBC parameter line in '%s': '%s'", resource.path, line);
 		}
 		result[key] = value;
 	}
 	return result;
-}
-
-static string ReadTextFile(const string &path) {
-	std::ifstream input(path);
-	if (!input.is_open()) {
-		throw IOException("Could not open LDBC resource file '%s'", path);
-	}
-	std::stringstream buffer;
-	buffer << input.rdbuf();
-	return buffer.str();
 }
 
 static string ExtractTagValue(const string &block, const string &tag, idx_t start_offset = 0) {
@@ -100,8 +77,8 @@ static string ScaleFactorName(double scale_factor) {
 }
 
 static unordered_map<string, string> ReadScaleFactorProperties(const string &resource_dir, const string &scale_factor) {
-	auto path = JoinPath(resource_dir, "scale_factors.xml");
-	auto xml = ReadTextFile(path);
+	auto path = LdbcResourcePath(resource_dir, "scale_factors.xml");
+	auto xml = LdbcReadResourceText(resource_dir, "scale_factors.xml");
 	auto marker = "<scale_factor name=\"" + scale_factor + "\">";
 	auto start = xml.find(marker);
 	if (start == string::npos) {
