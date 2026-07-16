@@ -38,6 +38,7 @@
 #include "parquet_writer.hpp"
 #include "zstd_file_system.hpp"
 #include "writer/primitive_column_writer.hpp"
+#include "duckdb/common/windows_undefs.hpp"
 
 #include <atomic>
 #include <fstream>
