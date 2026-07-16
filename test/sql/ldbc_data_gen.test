@@ -11,6 +11,8 @@ Catalog Error: Table Function with name ldbcgen does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require ldbc_data_gen
 
+require parquet
+
 # Spark-derived datagen configuration is resolved from pinned params_default.ini
 # plus scale_factors.xml.
 query TTTT
@@ -229,23 +231,84 @@ Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
 
+# Confirm threaded person-core generation preserves deterministic row counts.
+query TI
+SELECT relation_name, row_count
+FROM ldbcgen(sf := 0.003, schema := 'ldbc_counts_threads4', threads := 4)
+WHERE relation_name IN ('Person', 'Person_hasInterest_Tag', 'Person_knows_Person', 'Post', 'Comment')
+ORDER BY relation_name;
+----
+Comment	471
+Person	50
+Person_hasInterest_Tag	1256
+Person_knows_Person	83
+Post	3189
+
 # Confirm the CALL contract creates DuckDB tables.
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test');
+
+# The extension exposes the complete official LDBC BI query catalog.
+query III
+SELECT COUNT(*), MIN(query_nr), MAX(query_nr)
+FROM ldbc_bi_queries();
+----
+20	1	20
+
+# Query pragmas run directly against generated base relations. The compatibility
+# CTEs derive merged Message and the other reference-only relations inline.
+statement ok
+PRAGMA ldbc_bi(1, schema = 'ldbc_test', datetime = TIMESTAMP '2012-01-01');
+
+statement ok
+PRAGMA ldbc_bi(
+  12,
+  schema = 'ldbc_test',
+  start_date = TIMESTAMP '2010-07-22',
+  length_threshold = 20,
+  languages = ['ar', 'hu']
+);
+
+# Exercise the DuckDB adaptations of the recursive path queries.
+statement ok
+PRAGMA ldbc_bi(
+  15,
+  schema = 'ldbc_test',
+  person1_id = 21990232564808,
+  person2_id = 26388279076936,
+  start_date = TIMESTAMP '2010-11-01',
+  end_date = TIMESTAMP '2010-12-01'
+);
+
+statement ok
+PRAGMA ldbc_bi(19, schema = 'ldbc_test', city1_id = 608, city2_id = 1148);
+
+statement ok
+PRAGMA ldbc_bi(20, schema = 'ldbc_test', person2_id = 32985348834889, company = 'Express_Air');
+
+statement error
+PRAGMA ldbc_bi(0, schema = 'ldbc_test');
+----
+Invalid Input Error: LDBC BI query number must be between 1 and 20
+
+statement error
+PRAGMA ldbc_bi(1, schema = 'ldbc_test');
+----
+Invalid Input Error: LDBC BI query 1 requires parameter 'datetime'
 
 query I
 SELECT COUNT(*)
 FROM duckdb_tables()
 WHERE schema_name = 'ldbc_test';
 ----
-18
+40
 
 query I
 SELECT COUNT(*)
 FROM duckdb_columns()
 WHERE schema_name = 'ldbc_test';
 ----
-86
+196
 
 query TTTT
 SELECT table_name, column_name, data_type, is_nullable
@@ -298,6 +361,18 @@ Post	3189
 Post_hasTag_Tag	182
 Tag	16080
 TagClass	71
+
+query TI
+SELECT 'inserts_post' AS relation_name, COUNT(*) AS row_count FROM ldbc_test.inserts_post
+UNION ALL SELECT 'inserts_person_knows_person', COUNT(*) FROM ldbc_test.inserts_person_knows_person
+UNION ALL SELECT 'deletes_post', COUNT(*) FROM ldbc_test.deletes_post
+UNION ALL SELECT 'deletes_person_likes_comment', COUNT(*) FROM ldbc_test.deletes_person_likes_comment
+ORDER BY relation_name;
+----
+deletes_person_likes_comment	1
+deletes_post	5
+inserts_person_knows_person	5
+inserts_post	196
 
 query II
 SELECT COUNT(*),
@@ -495,11 +570,52 @@ Catalog Error: Table with name "Organisation" already exists!
 statement ok
 CALL ldbcgen(sf := 0.003, schema := 'ldbc_test', overwrite := true);
 
-query TTTTTT
-SELECT relation_name, path, row_count, checksum, format, status
-FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003', format := 'parquet', overwrite := false);
+query ITTI
+SELECT COUNT(*), MIN(format), MIN(status), SUM(row_count)
+FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-parquet', format := 'parquet', overwrite := true);
 ----
-ldbc_snb_bi_static	out/sf0.003	NULL	NULL	parquet	planned
+18	parquet	recreated	35310
+
+query I
+SELECT COUNT(*)
+FROM read_parquet('out/sf0.003-parquet/graphs/parquet/bi/composite-merged-fk/initial_snapshot/dynamic/Person/*.parquet');
+----
+50
+
+query I
+SELECT COUNT(*)
+FROM glob('out/sf0.003-parquet/.ldbcgen-staging-*');
+----
+0
+
+query ITTI
+SELECT COUNT(*), MIN(format), MIN(status), SUM(row_count)
+FROM ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/sf0.003-csv', format := 'csv', overwrite := true);
+----
+18	csv	recreated	35310
+
+query I
+SELECT COUNT(*)
+FROM read_csv('out/sf0.003-csv/dynamic/Person.csv', header := true);
+----
+50
+
+query I
+SELECT COUNT(*)
+FROM glob('out/sf0.003-csv/.ldbcgen-staging-*');
+----
+0
+
+statement error
+CALL ldbcgen(sf := 0.003, target := 'files', output_dir := 'out/staging-error', dictionary_dir := 'does-not-exist');
+----
+IO Error: Could not open LDBC dictionary file 'does-not-exist/dicLocations.txt'
+
+query I
+SELECT COUNT(*)
+FROM glob('out/staging-error/.ldbcgen-staging-*');
+----
+0
 
 statement error
 CALL ldbcgen(sf := 0);
@@ -532,28 +648,39 @@ query I
 SELECT COUNT(*)
 FROM ldbcgen_schema();
 ----
-86
+196
 
-query TTTTTTTT
-SELECT entity_path, kind, snapshot_path, column_index, column_name, nullable, logical_type, primary_key
+query TTTTTTTTT
+SELECT entity_path, kind, operation, snapshot_path, column_index, column_name, nullable, logical_type, primary_key
 FROM ldbcgen_schema(format := 'csv')
-WHERE relation_name = 'Post'
+WHERE relation_name = 'Post' AND operation = 'initial_snapshot'
 ORDER BY column_index
 LIMIT 3;
 ----
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	0	creationDate	false	TIMESTAMP_MS	id
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	1	id	false	BIGINT	id
-dynamic/Post	dynamic_node	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	2	imageFile	true	VARCHAR	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	0	creationDate	false	TIMESTAMP_MS	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	1	id	false	BIGINT	id
+dynamic/Post	dynamic_node	initial_snapshot	graphs/csv/bi/composite-merged-fk/initial_snapshot/dynamic/Post	2	imageFile	true	VARCHAR	id
 
 query TTT
 SELECT column_name, logical_type, primary_key
 FROM ldbcgen_schema()
-WHERE relation_name = 'Person_knows_Person'
+WHERE relation_name = 'Person_knows_Person' AND operation = 'initial_snapshot'
 ORDER BY column_index;
 ----
 creationDate	TIMESTAMP_MS	Person1Id,Person2Id
 Person1Id	BIGINT	Person1Id,Person2Id
 Person2Id	BIGINT	Person1Id,Person2Id
+
+query TTTT
+SELECT operation, column_name, logical_type, snapshot_path
+FROM ldbcgen_schema()
+WHERE relation_name = 'Person_likes_Comment' AND operation = 'deletes'
+ORDER BY column_index;
+----
+deletes	batch_id	DATE	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	deletionDate	TIMESTAMP_MS	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	PersonId	BIGINT	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
+deletes	CommentId	BIGINT	graphs/parquet/bi/composite-merged-fk/deletes/dynamic/Person_likes_Comment
 
 statement error
 SELECT * FROM ldbcgen_schema(format := 'json');

@@ -54,6 +54,16 @@ static string TrimWhitespaceLocal(const string &value) {
 	return value.substr(start, end - start);
 }
 
+static bool IsBmpOnlyUtf8(const string &value) {
+	for (auto character : value) {
+		auto byte = static_cast<unsigned char>(character);
+		if ((byte & 0xF8U) == 0xF0U) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static vector<string> SplitByDelimiterLocal(const string &line, const string &delimiter) {
 	vector<string> result;
 	idx_t offset = 0;
@@ -294,7 +304,8 @@ LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, con
 			throw InvalidInputException("Missing IP country abbreviation for '%s'", country_name);
 		}
 
-		auto zone_path = LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
+		auto zone_path =
+		    LdbcResourcePath(LdbcResourcePath(resource_dir, "ipaddrByCountries"), abbreviation->second + ".zone");
 		std::ifstream zone_file(zone_path);
 		if (!zone_file.is_open()) {
 			throw IOException("Could not open LDBC IP zone file '%s'", zone_path);
@@ -319,8 +330,7 @@ LdbcIPAddressDictionary::LdbcIPAddressDictionary(const string &resource_dir, con
 			if (parser.fail() || mask_bits > 32) {
 				throw InvalidInputException("Malformed IP zone line in '%s': '%s'", zone_path, line);
 			}
-			auto ip = ((byte1 & 0xFFU) << 24U) | ((byte2 & 0xFFU) << 16U) | ((byte3 & 0xFFU) << 8U) |
-			          (byte4 & 0xFFU);
+			auto ip = ((byte1 & 0xFFU) << 24U) | ((byte2 & 0xFFU) << 16U) | ((byte3 & 0xFFU) << 8U) | (byte4 & 0xFFU);
 			auto mask = mask_bits == 0 ? 0U : (0xFFFFFFFFU << (32U - mask_bits));
 			networks.push_back({ip & mask, mask});
 			zone_count++;
@@ -381,8 +391,8 @@ LdbcLanguageDictionary::LdbcLanguageDictionary(const string &dictionary_dir, con
 				continue;
 			}
 			auto language = language_columns[0];
-			auto language_id = NumericCast<int32_t>(std::find(languages.begin(), languages.end(), language) -
-			                                        languages.begin());
+			auto language_id =
+			    NumericCast<int32_t>(std::find(languages.begin(), languages.end(), language) - languages.begin());
 			if (language_id == NumericCast<int32_t>(languages.size())) {
 				languages.push_back(language);
 			}
@@ -742,17 +752,40 @@ LdbcTagTextDictionary::LdbcTagTextDictionary(const string &dictionary_dir, const
 		auto tag_id = NumericCast<idx_t>(std::stoi(line.substr(0, separator)));
 		auto content_start = separator + 2;
 		auto content_end = line.find("  ", content_start);
-		auto content = content_end == string::npos ? line.substr(content_start) : line.substr(content_start, content_end - content_start);
+		auto content = content_end == string::npos ? line.substr(content_start)
+		                                           : line.substr(content_start, content_end - content_start);
 		if (tag_id >= tag_text.size()) {
 			tag_text.resize(tag_id + 1);
 		}
 		tag_text[tag_id] = content;
 	}
+	tag_text_lengths.resize(tag_text.size(), 0);
+	tag_text_bmp_only.resize(tag_text.size(), true);
+	tag_prefixes.resize(tag_text.size());
+	tag_prefix_lengths.resize(tag_text.size(), 0);
+	for (idx_t tag_id = 0; tag_id < tag_text.size(); tag_id++) {
+		if (tag_text[tag_id].empty()) {
+			continue;
+		}
+		tag_text_lengths[tag_id] = LdbcJavaStringLength(tag_text[tag_id]);
+		tag_text_bmp_only[tag_id] = IsBmpOnlyUtf8(tag_text[tag_id]);
+		auto tag_name = tags.GetName(NumericCast<int32_t>(tag_id));
+		std::replace(tag_name.begin(), tag_name.end(), '_', ' ');
+		string escaped_tag_name;
+		for (auto character : tag_name) {
+			if (character == '"') {
+				escaped_tag_name += "\\\"";
+			} else {
+				escaped_tag_name += character;
+			}
+		}
+		tag_prefixes[tag_id] = "About " + escaped_tag_name + ", ";
+		tag_prefix_lengths[tag_id] = LdbcJavaStringLength(tag_prefixes[tag_id]);
+	}
 }
 
-int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size,
-                                                 LdbcJavaRandom &random_reduced_text, int32_t min_size,
-                                                 int32_t max_size, double reduced_text_ratio) const {
+int32_t LdbcTagTextDictionary::GetRandomTextSize(LdbcJavaRandom &random_text_size, LdbcJavaRandom &random_reduced_text,
+                                                 int32_t min_size, int32_t max_size, double reduced_text_ratio) const {
 	if (random_reduced_text.NextDouble() > reduced_text_ratio) {
 		return random_text_size.NextInt(max_size - min_size) + min_size;
 	}
@@ -764,58 +797,98 @@ int32_t LdbcTagTextDictionary::GetRandomLargeTextSize(LdbcJavaRandom &random_tex
 	return random_text_size.NextInt(max_size - min_size) + min_size;
 }
 
-string LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
-                                           int32_t text_size) const {
+LdbcGeneratedText LdbcTagTextDictionary::GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+                                                      int32_t text_size) const {
 	if (tag_ids.empty()) {
-		return "";
+		return {};
 	}
 
 	string result;
+	result.reserve(NumericCast<idx_t>(text_size) + 64);
+	int32_t result_length = 0;
 	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
-	while (LdbcJavaStringLength(result) < text_size) {
+	while (result_length < text_size) {
 		for (auto tag_id : tag_ids) {
-			if (LdbcJavaStringLength(result) >= text_size) {
+			if (result_length >= text_size) {
 				break;
 			}
 			if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_text.size() || tag_text[tag_id].empty()) {
 				throw InternalException("LDBC tag text id out of range");
 			}
-			auto &content = tag_text[tag_id];
-			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - LdbcJavaStringLength(result));
-			auto tag_name = this->tags.GetName(tag_id);
-			std::replace(tag_name.begin(), tag_name.end(), '_', ' ');
-			string escaped_tag_name;
-			for (auto character : tag_name) {
-				if (character == '"') {
-					escaped_tag_name += "\\\"";
-				} else {
-					escaped_tag_name += character;
-				}
-			}
-			auto prefix = "About " + escaped_tag_name + ", ";
-			this_tag_text_size += LdbcJavaStringLength(prefix);
-			auto content_length = LdbcJavaStringLength(content);
+			auto tag_idx = NumericCast<idx_t>(tag_id);
+			auto &content = tag_text[tag_idx];
+			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - result_length);
+			auto &prefix = tag_prefixes[tag_idx];
+			auto prefix_length = tag_prefix_lengths[tag_idx];
+			this_tag_text_size += prefix_length;
+			auto content_length = tag_text_lengths[tag_idx];
 			if (this_tag_text_size >= content_length) {
 				result += content;
+				result_length += content_length;
 			} else {
-				auto prefix_length = LdbcJavaStringLength(prefix);
 				auto starting_pos = random_text_size.NextInt(content_length - this_tag_text_size + prefix_length);
+				auto fragment = LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
 				result += prefix;
-				result += LdbcJavaSubstring(content, starting_pos, this_tag_text_size - prefix_length);
+				result += fragment;
+				result_length +=
+				    tag_text_bmp_only[tag_idx] ? this_tag_text_size : prefix_length + LdbcJavaStringLength(fragment);
 			}
 		}
 	}
 
 	if (!result.empty() && result.back() != '.') {
 		result += ".";
+		result_length++;
 	}
-	if (LdbcJavaStringLength(result) < text_size - 1) {
+	if (result_length < text_size - 1) {
 		result += " ";
+		result_length++;
 	}
-	if (LdbcJavaStringLength(result) > text_size) {
+	if (result_length > text_size) {
 		result = LdbcJavaSubstring(result, 0, text_size - 1);
+		result_length = text_size - 1;
 	}
-	return StringUtil::Replace(result, "|", " ");
+	if (result.find('|') != string::npos) {
+		result = StringUtil::Replace(result, "|", " ");
+	}
+	return {std::move(result), result_length};
+}
+
+LdbcGeneratedText LdbcTagTextDictionary::ConsumeText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+                                                     int32_t text_size) const {
+	if (tag_ids.empty()) {
+		return {};
+	}
+	int32_t result_length = 0;
+	auto text_size_per_tag = static_cast<int32_t>(std::ceil(text_size / static_cast<double>(tag_ids.size())));
+	while (result_length < text_size) {
+		for (auto tag_id : tag_ids) {
+			if (result_length >= text_size) {
+				break;
+			}
+			if (tag_id < 0 || static_cast<idx_t>(tag_id) >= tag_text.size() || tag_text[tag_id].empty()) {
+				throw InternalException("LDBC tag text id out of range");
+			}
+			auto tag_idx = NumericCast<idx_t>(tag_id);
+			auto this_tag_text_size = std::min<int32_t>(text_size_per_tag, text_size - result_length);
+			auto prefix_length = tag_prefix_lengths[tag_idx];
+			this_tag_text_size += prefix_length;
+			auto content_length = tag_text_lengths[tag_idx];
+			if (this_tag_text_size >= content_length) {
+				result_length += content_length;
+			} else {
+				auto starting_pos = random_text_size.NextInt(content_length - this_tag_text_size + prefix_length);
+				if (tag_text_bmp_only[tag_idx]) {
+					result_length += this_tag_text_size;
+				} else {
+					auto fragment =
+					    LdbcJavaSubstring(tag_text[tag_idx], starting_pos, this_tag_text_size - prefix_length);
+					result_length += prefix_length + LdbcJavaStringLength(fragment);
+				}
+			}
+		}
+	}
+	return {{}, std::min<int32_t>(result_length, text_size)};
 }
 
 LdbcTagMatrix::LdbcTagMatrix(const string &dictionary_dir) {
@@ -953,10 +1026,10 @@ LdbcUniversityDictionary::LdbcUniversityDictionary(const string &dictionary_dir,
 }
 
 int32_t LdbcUniversityDictionary::GetRandomUniversityLocation(LdbcJavaRandom &random_uncorrelated_university,
-                                                             LdbcJavaRandom &random_uncorrelated_location,
-                                                             LdbcJavaRandom &random_top_university,
-                                                             LdbcJavaRandom &random_university,
-                                                             int32_t country_id) const {
+                                                              LdbcJavaRandom &random_uncorrelated_location,
+                                                              LdbcJavaRandom &random_top_university,
+                                                              LdbcJavaRandom &random_university,
+                                                              int32_t country_id) const {
 	auto probability = random_uncorrelated_university.NextDouble();
 	auto &countries = places.GetCountries();
 	if (random_uncorrelated_university.NextDouble() <= prob_uncorrelated_university) {
@@ -995,8 +1068,7 @@ LdbcPersonDictionaries::LdbcPersonDictionaries(const string &resource_dir, doubl
       tag_matrix(LdbcResourcePath(resource_dir, "dictionaries")),
       companies(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_company),
       universities(LdbcResourcePath(resource_dir, "dictionaries"), places, prob_uncorrelated_university,
-                   prob_top_university,
-                   NumericCast<int64_t>(companies.GetCompanyCount())) {
+                   prob_top_university, NumericCast<int64_t>(companies.GetCompanyCount())) {
 }
 
 } // namespace duckdb

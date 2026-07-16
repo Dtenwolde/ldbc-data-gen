@@ -13,6 +13,8 @@ public:
 	explicit LdbcJavaRandom(int64_t seed);
 
 	void SetSeed(int64_t seed);
+	uint64_t GetRawSeed() const;
+	void SetRawSeed(uint64_t raw_seed);
 	int32_t Next(int bits);
 	int32_t NextInt();
 	int32_t NextInt(int32_t bound);

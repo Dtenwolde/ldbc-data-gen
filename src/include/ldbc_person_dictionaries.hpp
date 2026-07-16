@@ -134,6 +134,11 @@ private:
 	vector<vector<double>> cumulative_distribution_by_country;
 };
 
+struct LdbcGeneratedText {
+	string content;
+	int32_t java_length = 0;
+};
+
 class LdbcTagTextDictionary {
 public:
 	LdbcTagTextDictionary(const string &dictionary_dir, const LdbcTagDictionary &tags);
@@ -141,11 +146,18 @@ public:
 	int32_t GetRandomTextSize(LdbcJavaRandom &random_text_size, LdbcJavaRandom &random_reduced_text, int32_t min_size,
 	                          int32_t max_size, double reduced_text_ratio) const;
 	int32_t GetRandomLargeTextSize(LdbcJavaRandom &random_text_size, int32_t min_size, int32_t max_size) const;
-	string GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids, int32_t text_size) const;
+	LdbcGeneratedText GenerateText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+	                               int32_t text_size) const;
+	LdbcGeneratedText ConsumeText(LdbcJavaRandom &random_text_size, const vector<int32_t> &tag_ids,
+	                              int32_t text_size) const;
 
 private:
 	const LdbcTagDictionary &tags;
 	vector<string> tag_text;
+	vector<int32_t> tag_text_lengths;
+	vector<bool> tag_text_bmp_only;
+	vector<string> tag_prefixes;
+	vector<int32_t> tag_prefix_lengths;
 };
 
 class LdbcTagMatrix {

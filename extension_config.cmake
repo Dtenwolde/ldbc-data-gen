@@ -2,6 +2,7 @@
 
 # ICU is built first so this extension can use its vendored C++ normalization APIs.
 duckdb_extension_load(icu)
+duckdb_extension_load(parquet)
 
 # Extension from this repo
 duckdb_extension_load(ldbc_data_gen

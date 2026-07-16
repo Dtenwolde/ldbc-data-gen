@@ -1,0 +1,131 @@
+# name: test/sql/ldbc_bi_results.test
+# description: regression results for all LDBC SNB BI query pragmas
+# group: [sql]
+
+require ldbc_data_gen
+
+# This deterministic SF0.003 fixture is a regression oracle for the DuckDB
+# implementation. It is intentionally separate from the audited SF10 LDBC
+# cross-validation data, which is too large for the regular extension CI job.
+statement ok
+CALL ldbcgen(sf := 0.003, schema := 'ldbc_bi_results');
+
+# Q1: Posting summary
+query IIIIRIR
+PRAGMA ldbc_bi(1, schema = 'ldbc_bi_results', datetime = TIMESTAMP '2011-12-01');
+----
+42 values hashing to 13624ace28f2b60123fb10d4a78c376d
+
+# Q2: Tag evolution
+query TIII
+PRAGMA ldbc_bi(2, schema = 'ldbc_bi_results', date = TIMESTAMP '2012-06-01', tag_class = 'MusicalArtist');
+----
+400 values hashing to 131ec47d680c2960a9de69e4b2b8220a
+
+# Q3: Popular topics in a country
+query ITTII
+PRAGMA ldbc_bi(3, schema = 'ldbc_bi_results', tag_class = 'MusicalArtist', country = 'Burma');
+----
+5 values hashing to 68fcbedebf62b6b26f6a25344e835c61
+
+# Q4: Top message creators by country
+query ITTTI
+PRAGMA ldbc_bi(4, schema = 'ldbc_bi_results', date = TIMESTAMP '2012-09-01');
+----
+230 values hashing to f2c6b18456bf0e69a67af55cf3a44f31
+
+# Q5: Most active posters in a given topic
+query IIIII
+PRAGMA ldbc_bi(5, schema = 'ldbc_bi_results', tag = 'Franz_Kafka');
+----
+35 values hashing to baa2fce7b54f8c112a9b7a3f00514f81
+
+# Q6: Most authoritative users on a given topic
+query II
+PRAGMA ldbc_bi(6, schema = 'ldbc_bi_results', tag = 'Uruguay');
+----
+10 values hashing to fb2dae00a6b8694de84fd21cbb813a11
+
+# Q7: Related topics
+query TI
+PRAGMA ldbc_bi(7, schema = 'ldbc_bi_results', tag = 'Franz_Kafka');
+----
+40 values hashing to c1c4e3cec0ee4c687e2f7b8b221d2f14
+
+# Q8: Central person for a tag
+query III
+PRAGMA ldbc_bi(8, schema = 'ldbc_bi_results', tag = 'Che_Guevara', start_date = TIMESTAMP '2011-07-20', end_date = TIMESTAMP '2011-07-25');
+----
+3 values hashing to bcc12e1d7c6f61f69b2587e8360a1121
+
+# Q9: Top thread initiators
+query ITTII
+PRAGMA ldbc_bi(9, schema = 'ldbc_bi_results', start_date = TIMESTAMP '2011-10-01', end_date = TIMESTAMP '2011-10-15');
+----
+30 values hashing to 2ca944d268f5225f3caf654e40d6fb2b
+
+# Q10: Experts in social circle
+query ITI
+PRAGMA ldbc_bi(10, schema = 'ldbc_bi_results', person_id = 26388279066632, country = 'Algeria', tag_class = 'Country');
+----
+150 values hashing to 1b7547db3847feb36949c555ce490836
+
+# Q11: Friend triangles
+query I
+PRAGMA ldbc_bi(11, schema = 'ldbc_bi_results', country = 'China', start_date = TIMESTAMP '2010-06-01', end_date = TIMESTAMP '2010-07-01');
+----
+1 values hashing to 897316929176464ebc9ad085f31e7284
+
+# Q12: Message-count distribution
+query II
+PRAGMA ldbc_bi(12, schema = 'ldbc_bi_results', start_date = TIMESTAMP '2010-07-22', length_threshold = 20, languages = ['ar', 'hu']);
+----
+10 values hashing to 58eebf2eb682005c0e5ba615040e5371
+
+# Q13: Zombies in a country
+query IIIR
+PRAGMA ldbc_bi(13, schema = 'ldbc_bi_results', country = 'China', end_date = TIMESTAMP '2013-01-01');
+----
+4 values hashing to bc3481fe38df85c80c80ab28f018ac3e
+
+# Q14: International dialog
+query IITI
+PRAGMA ldbc_bi(14, schema = 'ldbc_bi_results', country1 = 'India', country2 = 'Azerbaijan');
+----
+12 values hashing to 9c8660eb4968f7dbc6a7d260de0a6c0f
+
+# Q15: Trusted connection paths through forums
+query R
+PRAGMA ldbc_bi(15, schema = 'ldbc_bi_results', person1_id = 21990232564808, person2_id = 26388279076936, start_date = TIMESTAMP '2010-11-01', end_date = TIMESTAMP '2010-12-01');
+----
+1 values hashing to fd446016346e5c86d76fcecbdb92e4eb
+
+# Q16: Fake-news detection
+query III
+PRAGMA ldbc_bi(16, schema = 'ldbc_bi_results', tag_a = 'Hannibal', date_a = DATE '2012-11-17', tag_b = 'Hannibal', date_b = DATE '2012-11-17', max_knows_limit = 100);
+----
+12 values hashing to 1ea5dcbcb0d30864ce1ce7b613ab1ca5
+
+# Q17: Information propagation analysis
+query II
+PRAGMA ldbc_bi(17, schema = 'ldbc_bi_results', tag = 'Slavoj_Žižek', delta = 4);
+----
+0 values hashing to d41d8cd98f00b204e9800998ecf8427e
+
+# Q18: Friend recommendation
+query III
+PRAGMA ldbc_bi(18, schema = 'ldbc_bi_results', tag = 'Elizabeth_II');
+----
+36 values hashing to 88fb15c9e82456ce30ce6a3df62364b7
+
+# Q19: Interaction path between cities
+query IIR
+PRAGMA ldbc_bi(19, schema = 'ldbc_bi_results', city1_id = 737, city2_id = 966);
+----
+3 values hashing to 1d617083ccecc56dda831a3bac5cc203
+
+# Q20: Recruitment
+query IR
+PRAGMA ldbc_bi(20, schema = 'ldbc_bi_results', person2_id = 2199023255573, company = 'Airblue');
+----
+2 values hashing to 1624c267ed98bf5920072726d13c24ef

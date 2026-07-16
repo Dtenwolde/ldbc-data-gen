@@ -8,9 +8,13 @@
 #include "duckdb/common/types/timestamp.hpp"
 
 #include <array>
+#include <functional>
+#include <memory>
 #include <unordered_map>
 
 namespace duckdb {
+
+class ClientContext;
 
 enum class LdbcRandomAspect : uint8_t {
 	DATE = 0,
@@ -88,13 +92,17 @@ enum class LdbcRandomAspect : uint8_t {
 
 class LdbcRandomGeneratorFarm {
 public:
+	static constexpr idx_t ASPECT_COUNT = static_cast<idx_t>(LdbcRandomAspect::NUM_ASPECT);
+	using State = std::array<uint64_t, ASPECT_COUNT>;
+
 	LdbcRandomGeneratorFarm();
 
 	void Reset(int64_t seed);
+	State Snapshot() const;
+	void Restore(const State &state);
 	LdbcJavaRandom &Get(LdbcRandomAspect aspect);
 
 private:
-	static constexpr idx_t ASPECT_COUNT = static_cast<idx_t>(LdbcRandomAspect::NUM_ASPECT);
 	std::array<LdbcJavaRandom, ASPECT_COUNT> generators;
 };
 
@@ -211,6 +219,8 @@ struct LdbcComment {
 
 struct LdbcLike {
 	int64_t creation_date;
+	int64_t deletion_date;
+	bool explicitly_deleted;
 	int64_t person_id;
 	int64_t message_id;
 };
@@ -230,6 +240,18 @@ struct LdbcForum {
 	vector<LdbcComment> comments;
 	vector<LdbcLike> post_likes;
 	vector<LdbcLike> comment_likes;
+};
+
+class LdbcForumOutputSink {
+public:
+	virtual ~LdbcForumOutputSink() = default;
+
+	virtual void AppendForum(const LdbcForum &forum) = 0;
+	virtual void AppendPost(const LdbcPost &post) = 0;
+	virtual void AppendComment(const LdbcComment &comment) = 0;
+	virtual void AppendPostLike(const LdbcLike &like) = 0;
+	virtual void AppendCommentLike(const LdbcLike &like) = 0;
+	virtual void Finish() = 0;
 };
 
 class LdbcFacebookDegreeDistribution {
@@ -269,9 +291,50 @@ private:
 };
 
 vector<LdbcPersonCore> LdbcGeneratePersons(const LdbcDatagenConfig &config);
-vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons);
+
+class LdbcKnowsGenerator {
+public:
+	LdbcKnowsGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons, idx_t threads = 1,
+	                   ClientContext *context = nullptr);
+	~LdbcKnowsGenerator();
+
+	bool GenerateNext(idx_t max_blocks = 1);
+	double Progress() const;
+	vector<LdbcKnowsEdge> ReleaseEdges();
+
+private:
+	struct Impl;
+	unique_ptr<Impl> impl;
+};
+
+vector<LdbcKnowsEdge> LdbcGenerateKnows(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
+                                        idx_t threads = 1, ClientContext *context = nullptr);
+
+class LdbcForumGenerator {
+public:
+	using OutputSinkFactory = std::function<unique_ptr<LdbcForumOutputSink>(idx_t slice_id)>;
+
+	LdbcForumGenerator(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
+	                   const vector<LdbcKnowsEdge> &knows_edges,
+	                   const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
+	                   const std::function<void(idx_t done, idx_t total)> &progress = nullptr, idx_t threads = 1,
+	                   ClientContext *context = nullptr, const OutputSinkFactory &output_sink_factory = nullptr);
+	~LdbcForumGenerator();
+
+	bool GenerateNext(idx_t max_persons = 1);
+	double Progress() const;
+	vector<LdbcForum> ReleaseForums();
+
+private:
+	struct Impl;
+	unique_ptr<Impl> impl;
+};
+
 vector<LdbcForum> LdbcGenerateForums(const LdbcDatagenConfig &config, const vector<LdbcPersonCore> &persons,
-                                     const vector<LdbcKnowsEdge> &knows_edges);
+                                     const vector<LdbcKnowsEdge> &knows_edges,
+                                     const std::function<void(LdbcForum &&forum)> &emit_forum = nullptr,
+                                     const std::function<void(idx_t done, idx_t total)> &progress = nullptr,
+                                     idx_t threads = 1, ClientContext *context = nullptr);
 
 timestamp_t LdbcTimestampMs(int64_t epoch_ms);
 date_t LdbcDateFromEpochMs(int64_t epoch_ms);

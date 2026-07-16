@@ -1,0 +1,44 @@
+name: SF1 Parity
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || '' }}
+  cancel-in-progress: true
+
+jobs:
+  sf1-parity:
+    name: Verify SF1 relations and BI queries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y ccache ninja-build
+
+      - name: Cache compiler output
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: sf1-parity-${{ runner.os }}-${{ hashFiles('src/**', 'CMakeLists.txt', 'extension_config.cmake', 'duckdb/CMakeLists.txt') }}
+          restore-keys: |
+            sf1-parity-${{ runner.os }}-
+
+      - name: Build release extension
+        run: GEN=ninja make release
+
+      - name: Verify SF1 parity
+        run: |
+          python3 tools/generated_checksums.py \
+            --sf 1 \
+            --threads 1 \
+            --expected test/fixtures/ldbc_snb_bi_sf1_checksums.csv \
+            --expected-bi-results test/fixtures/ldbc_snb_bi_sf1_results.json

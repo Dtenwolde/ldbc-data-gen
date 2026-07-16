@@ -200,7 +200,8 @@ LdbcDatagenConfig LdbcDatagenConfig::Load(double scale_factor, const string &res
 	config.max_num_comments = IntProperty(config.properties, "generator.maxNumComments");
 	config.max_num_flashmob_post_per_month = IntProperty(config.properties, "generator.maxNumFlashmobPostPerMonth");
 	config.max_num_group_created_per_person = IntProperty(config.properties, "generator.maxNumGroupCreatedPerPerson");
-	config.max_num_group_flashmob_post_per_month = IntProperty(config.properties, "generator.maxNumGroupFlashmobPostPerMonth");
+	config.max_num_group_flashmob_post_per_month =
+	    IntProperty(config.properties, "generator.maxNumGroupFlashmobPostPerMonth");
 	config.max_num_group_post_per_month = IntProperty(config.properties, "generator.maxNumGroupPostPerMonth");
 	config.max_num_like = IntProperty(config.properties, "generator.maxNumLike");
 	config.max_group_size = IntProperty(config.properties, "generator.maxNumMemberGroup");

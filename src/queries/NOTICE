@@ -1,0 +1,7 @@
+The SQL queries in this directory are adapted from the official LDBC SNB BI
+reference implementation:
+https://github.com/ldbc/ldbc_snb_bi/tree/main/umbra/queries
+Source revision: 47dd38b40844ecdb0e42e5a610c369535304786d
+
+Copyright 2023 LDBC
+Licensed under the Apache License, Version 2.0.
